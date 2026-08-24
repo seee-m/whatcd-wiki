@@ -1,0 +1,24 @@
+{
+  "name": "whatcd-wiki",
+  "private": true,
+  "version": "0.0.0",
+  "workspaces": [
+    "api",
+    "web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm run dev -w api\" \"npm run dev -w web\"",
+    "build": "npm run build -w api && npm run build -w web",
+    "import": "node api/import/import.mjs",
+    "import:wiki": "node api/import/import-wiki.mjs"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "allowScripts": {
+    "better-sqlite3@11.10.0": true,
+    "esbuild@0.28.2": true,
+    "fsevents@2.3.3": true,
+    "esbuild@0.25.12": true
+  }
+}

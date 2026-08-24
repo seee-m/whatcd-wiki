@@ -1,0 +1,452 @@
+/* Supplemental to the vendored global.css / shiro.css -- covers things
+   this archive adds that the original site's CSS never needed to style:
+   inert nav chrome, the stats box, pagination, category checkboxes, and
+   wiki article body classes emitted by api/import/bbcode.mjs. */
+
+/* Inert nav/chrome: same layout as the real links they sit next to, but
+   visibly greyed out and non-interactive -- see the plan's "Nav / chrome
+   fidelity" section. */
+/* opacity (not just color) so this reliably reads as "disabled" for any
+   element -- including an <input>'s placeholder text, which doesn't
+   consistently inherit a plain `color` override across browsers. */
+.inert,
+.inert-input {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* shiro.css's own #menu ul li a padding is `0.6em 2%` -- the 2% resolves
+   against the (wide, ~1000px) #menu ul, giving ~20px of horizontal
+   padding per side. Multi-word labels ("Top 10", "Staff Inbox") then
+   didn't fit their own box and wrapped to a second line, making that one
+   button visibly taller than its single-line neighbors. Fixed px padding
+   + nowrap keeps every button exactly one line, and .inert (a <span>,
+   not shiro's <a>) needs the same rule explicitly since it's a different
+   element than the one shiro styled. */
+#menu ul li a,
+#menu ul li span.inert {
+  display: inline-block;
+  padding: 0.45em 8px;
+  white-space: nowrap;
+}
+
+/* shiro.css's own #menu ul li also carries `padding: 6px 0` -- that's
+   dead space around the <a>/.inert above, not inside it, so the grey
+   button (the li's own background) rendered visibly taller than the
+   part that actually highlights on hover (just the <a>'s box). Zeroing
+   it makes the button's box *be* the interactive area, not padding
+   around it. */
+#menu ul li {
+  padding: 0;
+}
+
+#menu ul li a:focus {
+  outline: none;
+}
+
+#footer span.inert {
+  font-size: 0.9em;
+}
+
+/* shiro.css lays #userinfo/#logo/#menu/#searchbars out with
+   position:absolute + hand-guessed top/left pixel offsets, sized to fit
+   whatever fixed chrome the original page had around them. Recreating
+   that from scratch repeatedly produced gaps and overlaps from slightly
+   wrong guesses. Overridden here to normal document flow instead: each
+   row is a full-width block that sizes itself, stacked top to bottom --
+   it cannot overlap or leave a gap because nothing has to guess anyone
+   else's height. */
+
+#header {
+  background-color: #DDD;
+}
+
+/* One centered line: member links, then the username with a bit of extra
+   space after "Donate" -- not split to opposite edges, and no distinct
+   background (shiro's #CCC removed so it blends into #header). */
+#userinfo {
+  position: static;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 6px 0;
+  box-sizing: border-box;
+  background: none;
+}
+
+/* shiro.css's `#userinfo ul` / `#userinfo ul li` (descendant selectors,
+   specificity 1-0-1 / 1-0-2) beat a bare `#userinfo_username` id selector
+   (1-0-0) regardless of source order -- that 0.8%/4px/0.1em padding-and-
+   margin combination is exactly what was eating the "big gap" on the
+   right (and a smaller one on the left). Matched with equal specificity
+   here by qualifying under #userinfo too. */
+#userinfo #userinfo_username,
+#userinfo #userinfo_major {
+  position: static;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  color: #444;
+}
+
+#userinfo #userinfo_username li,
+#userinfo #userinfo_major li {
+  margin: 0;
+  padding: 0;
+}
+
+/* A bit of extra breathing room between "Donate" and the username that
+   now follows it, beyond the regular 10px item gap. */
+#userinfo #userinfo_username {
+  margin-left: 20px;
+}
+
+/* shiro.css's own #logo is a fixed 220x50 box (background-image sized for
+   the original logo file) -- overridden to fit this logo's real 1000x290
+   proportions instead of clipping it. `margin: auto` can't center a
+   width:auto block (there's no leftover space to distribute since it
+   fills its container) -- text-align does the centering instead, since
+   the link+image inside are inline. */
+#logo {
+  width: auto;
+  height: auto;
+  margin: 10px 0;
+  padding: 0;
+  text-align: center;
+  background: none;
+}
+
+/* shiro.css's #logo a is `display: block; width: 220px` -- a block-level
+   anchor doesn't respond to the parent's text-align, which is why it was
+   still pinned left despite #logo itself being centered. */
+#logo a {
+  display: inline-block;
+  width: auto;
+  height: auto;
+}
+
+/* Images are inline-level by default, so the parent's text-align: center
+   centers it -- display:block here would opt back out of that. */
+#logo img {
+  display: inline-block;
+}
+
+#menu {
+  position: static;
+  width: auto;
+  text-align: center;
+}
+
+/* align-items defaults to `stretch`, which is what turned every nav item
+   into a tall rectangle spanning the full row height (they were being
+   stretched to match the row's cross-axis size) instead of a normal-height
+   button -- `center` was missing here. */
+#menu ul {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  max-width: 1000px;
+  margin: 0 auto;
+  list-style: none;
+  padding: 0;
+}
+
+/* Full-bleed background (matches #content/#footer already spanning edge
+   to edge), with just the search boxes themselves centered inside. */
+#searchbars {
+  position: static;
+  width: auto;
+}
+
+.searchbars-inner {
+  max-width: 1000px;
+  margin: 0 auto;
+}
+
+.searchbars-inner ul {
+  align-items: center;
+}
+
+.searchbars-inner ul {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* shiro.css's own #content rule is `position: relative; top: 60px` --
+   that regressed back in during the header rewrite below and was the
+   exact cause of the 60px grey gap (the raw <body> background showing
+   through between #header's bottom and #content's top). */
+#content {
+  position: static;
+  top: auto;
+  padding-top: 28px;
+  padding-bottom: 30px;
+}
+
+#wrapper.thin {
+  width: 100%;
+  max-width: 1000px;
+  margin: 0 auto;
+  padding: 0 15px;
+  box-sizing: border-box;
+}
+
+/* More breathing room between the search bars above and the page title,
+   and between the title and the boxes below it. */
+#wrapper.thin > h2:first-child {
+  margin: 4px 0 28px 0;
+}
+
+/* shiro.css's own .body padding is `3px 10px 10px 10px` -- less at the
+   top than the sides, which reads as uneven/cramped. Match all sides to
+   the existing side (10px) value instead. */
+.body {
+  padding: 10px;
+}
+
+/* .sidebar/.main_column ship as float:right + a fixed 590px/255px-margin
+   pairing sized for the original page's own width -- against this
+   project's 1000px column that leaves a large, inconsistent gap between
+   the two boxes. A flex row keeps them close, with the same 10px gap
+   shiro.css already uses between stacked boxes within a column
+   (.main_column .box/table's own margin-bottom), so the horizontal and
+   vertical rhythm match. */
+.detail-columns {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.detail-columns .sidebar {
+  float: none;
+  width: 260px;
+  flex: 0 0 260px;
+  margin: 0;
+}
+
+/* shiro.css's `.sidebar .box` also carries a stray 5px left/right margin
+   (sized for its own narrower original layout) on top of the column
+   gap above -- zeroed so the only horizontal spacing is the gap. */
+.detail-columns .sidebar .box {
+  margin: 0 0 10px 0;
+}
+
+.detail-columns .main_column {
+  float: none;
+  width: auto;
+  flex: 1 1 400px;
+  min-width: 0;
+  margin: 0;
+  order: 1;
+}
+
+/* Flexbox lays children out in source order by default -- .sidebar comes
+   first in the markup (so it still reads first for screen readers/no-CSS
+   fallback), but visually it belongs on the right. */
+.detail-columns .sidebar {
+  order: 2;
+}
+
+/* shiro.css's `.thin` is the *page*-width rule (850px, meant for
+   #wrapper) -- it was mistakenly reused on small in-box lists (Artists,
+   collages, aliases, search results), forcing them to try to be 850px
+   wide inside a ~240px sidebar box. That's what caused both the huge
+   left indent (auto-margins centering an 850px element) and the text
+   overflowing past the box edge. Plain lists just need list-style/
+   default browser indent reset, not a width. shiro's `li { margin: 5px
+   15px }` is also part of the same over-indent -- override it here too. */
+.nobullet,
+.plain-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.plain-list {
+  list-style: disc;
+  padding-left: 20px;
+}
+
+.nobullet li,
+.plain-list li {
+  margin: 4px 0;
+}
+
+/* Category checkboxes (mirrors sections/torrents/browse.php's filter_cat[]) */
+.filter_torrents .cat_list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 10px;
+  cursor: pointer;
+}
+
+.filter_torrents .cat_list img {
+  vertical-align: middle;
+}
+
+/* Pagination */
+.pagination {
+  text-align: center;
+  padding: 10px 0;
+}
+
+.pagination a,
+.pagination span {
+  margin: 0 4px;
+}
+
+.pagination .current {
+  font-weight: bold;
+}
+
+/* Wiki article body (classes emitted by api/import/bbcode.mjs) */
+.wiki-body h2,
+.wiki-body h3,
+.wiki-body h4 {
+  margin-top: 1em;
+}
+
+.wiki-body ul.wiki-list {
+  margin: 0 0 10px 25px;
+}
+
+.wiki-body .wiki-important {
+  border: 1px solid #BBB;
+  background: #EEE;
+  padding: 8px;
+  margin: 10px 0;
+}
+
+.wiki-body .wiki-missing-image {
+  color: #999;
+  font-style: italic;
+}
+
+.wiki-body pre,
+.wiki-body .wiki-code,
+.wiki-body .wiki-plain {
+  background: #EEE;
+  border: 1px solid #BBB;
+  padding: 8px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  font-family: monospace;
+}
+
+.wiki-body table {
+  margin: 10px 0;
+}
+
+.wiki-index-list {
+  columns: 3;
+}
+
+.wiki-index-list li {
+  margin: 3px 0;
+  break-inside: avoid;
+}
+
+/* Category icon buttons on release/collage rows */
+.cat-icon {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+}
+
+/* Simple detail key/value rows inside a .box .body */
+.kv-table td.label {
+  vertical-align: top;
+}
+
+/* Discography group headers on the artist page */
+.discog-group h3 {
+  margin-top: 15px;
+}
+
+/* The expandable per-edition file list. global.css's default td/th
+   padding (5px) is already symmetric, but reduced and made explicit here
+   so a dense tracklist doesn't feel as roomy as the outer boxes around
+   it, and given a small top margin to separate it from the "View file
+   list" toggle line above. */
+.file-list-table {
+  margin-top: 6px;
+}
+
+.file-list-table td {
+  padding: 4px 8px;
+}
+
+/* Collage cover art grid. Thumbnails are fetched lazily per-release (same
+   endpoint/cache as the release detail page) and fill in as each one
+   resolves -- .cover-grid-empty is the placeholder cell shown until then. */
+.cover-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
+  gap: 6px;
+}
+
+.cover-grid img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+  border: 1px solid #BBB;
+}
+
+.cover-grid-empty {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #DDD;
+  border: 1px solid #BBB;
+  box-sizing: border-box;
+}
+
+/* shiro.css's .tags never defined spacing between individual tags (each
+   was presumably separated by whitespace in the original PHP template's
+   markup) -- React's .map() output has no such whitespace between
+   elements, so they ran together as one word. Applies to both <a> tags
+   (release detail page) and plain <span> tags (collage page, which has
+   no per-tag id to link to). */
+/* shiro.css sets .tags italic and .tags a:hover to #dedede -- a near-
+   white that's essentially invisible against this light background
+   (probably fine against a darker skin, but not here). */
+.tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-style: normal;
+}
+
+.tags a:hover {
+  color: #222;
+}
+
+/* Marks the artist photo/bio box as a substitute, not original archive
+   content -- see api/src/artistInfo.ts. */
+.artist-info-disclaimer {
+  font-size: 0.85em;
+  color: #888;
+  margin-top: 6px;
+}
+
+.clear-filter {
+  font-size: 0.7em;
+  font-weight: normal;
+}

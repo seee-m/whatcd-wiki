@@ -1,0 +1,15 @@
+node_modules/
+dist/
+data/*.sqlite
+data/*.sqlite-*
+.env
+.DS_Store
+
+# Source data dump (~3.4GB) -- lives here for the import scripts to read,
+# but is source material, not project code. The built whatcd.sqlite it
+# produces lives outside this repo entirely (~/Library/Application
+# Support/whatcd-wiki), so it's never staged either.
+whatcd-goodbye/
+
+# Claude Code local (per-machine) settings, not shared project config.
+.claude/settings.local.json
