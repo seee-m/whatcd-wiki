@@ -26,6 +26,10 @@ export function ListDraft() {
 
   async function share() {
     if (!title.trim() || items.length === 0) return;
+    const confirmed = window.confirm(
+      'Are you sure you want to create this list? It will no longer be editable. Keep the link safe, it is your only way to access this list!',
+    );
+    if (!confirmed) return;
     setSaving(true);
     setError(null);
     try {

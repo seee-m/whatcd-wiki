@@ -7,6 +7,7 @@ export function SharedList() {
   const { id } = useParams();
   const [list, setList] = useState<SharedListData | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -73,6 +74,20 @@ export function SharedList() {
               </tbody>
             </table>
           </Box>
+          <p className="action-row">
+            <button
+              type="button"
+              className="dice-button auto-width-button"
+              onClick={() => {
+                navigator.clipboard.writeText(window.location.href).then(() => {
+                  setCopied(true);
+                  setTimeout(() => setCopied(false), 2000);
+                });
+              }}
+            >
+              {copied ? 'Copied!' : 'Copy link'}
+            </button>
+          </p>
         </div>
       </div>
     </>

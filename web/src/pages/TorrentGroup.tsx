@@ -278,11 +278,10 @@ export function TorrentGroup() {
             Not part of the original archive, may be inaccurate.
           </p>
         )}
-        <p className="center">
+        <p className="action-row">
           <button
             type="button"
-            className="dice-button"
-            style={{ width: 'auto', padding: '0 10px' }}
+            className="dice-button auto-width-button"
             onClick={() => {
               if (inDraft) {
                 removeFromDraft(release.id);

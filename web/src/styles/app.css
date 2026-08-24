@@ -233,6 +233,14 @@
   height: 20px;
 }
 
+/* A `.dice-button` used as a labeled text button (e.g. "Add to list",
+   "Copy link") rather than a fixed-size icon square. */
+.auto-width-button {
+  width: auto;
+  height: auto;
+  padding: 8px 12px;
+}
+
 /* Draft-count pill on the "your list" nav button. */
 .list-draft-badge {
   position: absolute;
@@ -286,6 +294,18 @@
   list-style: none;
   margin: 0;
   padding: 0;
+}
+
+/* shiro.css's `#searchbars ul li { margin: 0px 1px }` adds an extra 1px on
+   each side of every li -- redundant now that the row uses a real flex
+   `gap` for spacing, and it stacks with that gap to make every inter-li
+   gap 6px instead of 4px. The dice button and Torrents field don't show
+   this (they're plain siblings inside one li, not two separate li's), so
+   without this override every *other* pair in the row reads as more
+   spaced out than that first pair, even though the intent is one uniform
+   gap throughout. */
+#searchbars .searchbars-inner ul > li {
+  margin: 0;
 }
 
 /* shiro.css's own #content rule is `position: relative; top: 60px` --
@@ -570,7 +590,16 @@
   margin: 6px 0 0 0;
 }
 .box + .external-disclaimer {
-  margin: -4px 0 10px 2px;
+  margin: -4px 0 10px 0;
+}
+
+/* shiro.css's global `p { margin: 10px 5px }` gives every bare <p> a 5px
+   left margin -- .external-disclaimer overrides it via its own class
+   above, but a plain <p> wrapping an action button (Add to list, Copy
+   link) would otherwise silently inherit that same 5px and drift off the
+   box's left edge with no override in sight. */
+.action-row {
+  margin: 0;
 }
 
 .clear-filter {
