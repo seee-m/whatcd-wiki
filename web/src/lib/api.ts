@@ -145,6 +145,7 @@ export const api = {
   categories: () => get<Category[]>('/api/categories'),
   releaseTypes: () => get<ReleaseType[]>('/api/release-types'),
   torrents: (params: URLSearchParams) => get<ReleaseList>(`/api/torrents?${params}`),
+  randomTorrent: () => get<{ id: number }>('/api/torrents/random'),
   torrent: (id: number | string) => get<ReleaseDetail>(`/api/torrents/${id}`),
   torrentCover: (id: number | string) => get<{ url: string | null; source?: string }>(`/api/torrents/${id}/cover`),
   torrentExtras: (id: number | string) => get<ReleaseExtras>(`/api/torrents/${id}/extras`),

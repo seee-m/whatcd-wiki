@@ -60,6 +60,11 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     Object.entries(RELEASE_TYPES).map(([id, name]) => ({ id: Number(id), name })),
   );
 
+  app.get('/api/torrents/random', async () => {
+    const row = db.prepare('SELECT id FROM releases ORDER BY RANDOM() LIMIT 1').get() as { id: number };
+    return { id: row.id };
+  });
+
   app.get('/api/torrents', async (req) => {
     const q = req.query as Record<string, string | undefined>;
     const page = Math.max(1, Number(q.page) || 1);

@@ -31,17 +31,18 @@ export function Home() {
       <Box title="what.cd wiki">
         <p>
           The what.cd wiki is a read-only, semi-faithful recreation of what.cd's browsing experience, built from the
-          site's final database export. There is no login, no forum, and nothing here can be downloaded &mdash; it
-          exists to browse the release, artist, collage, and wiki metadata as it looked before the site closed in
-          late 2016.
+          site's final database export. There is no login, no forum, and nothing here can be downloaded &mdash; but
+          you can browse the releases, artists, collages, and wiki as they looked before the site closed in late
+          2016. I&rsquo;ve also added a few quality-of-life tweaks, (random button, Discogs integration, and a few
+          new sort options), so that you can get the most out of this amazing repository of information.
         </p>
         <p>
-          The death of what.cd really did herald the &lsquo;end of an era&rsquo; of music piracy, (perhaps due to
-          the prevalence of streaming and new forms of distribution as much as anything else), and though there are
-          still plenty of places you can go to download music for free, nothing else has ever come close to
-          replicating such a large, vibrant and dedicated community.
+          The death of what.cd (and oink before it) heralded the &lsquo;end of an era&rsquo; of music piracy,
+          (perhaps due to the prevalence of streaming and new forms of distribution as much as anything else), and
+          though there are still plenty of places you can go to download music for free, nothing else has ever come
+          close to replicating such a large, vibrant and dedicated community.
         </p>
-        <p>So long, and thanks for all the fish&hellip;</p>
+        <p>So long, and thanks for all the fish.</p>
       </Box>
 
       <Box title="Browse">
