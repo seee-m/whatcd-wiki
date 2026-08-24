@@ -61,7 +61,9 @@ export default async function torrentsRoutes(app: FastifyInstance) {
   );
 
   app.get('/api/torrents/random', async () => {
-    const row = db.prepare('SELECT id FROM releases ORDER BY RANDOM() LIMIT 1').get() as { id: number };
+    const row = db
+      .prepare('SELECT id FROM releases WHERE category_id = ? ORDER BY RANDOM() LIMIT 1')
+      .get(MUSIC_CATEGORY_ID) as { id: number };
     return { id: row.id };
   });
 

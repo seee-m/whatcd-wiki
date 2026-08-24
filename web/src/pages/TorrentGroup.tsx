@@ -223,25 +223,6 @@ export function TorrentGroup() {
             </ul>
           </Box>
         )}
-        <Box title="Your list">
-          <p className="center">
-            <button
-              type="button"
-              className="dice-button"
-              style={{ width: 'auto', padding: '0 10px' }}
-              onClick={() => {
-                if (inDraft) {
-                  removeFromDraft(release.id);
-                } else {
-                  addToDraft({ id: release.id, name: release.name, year: release.year, artists: release.artists });
-                }
-                setInDraft(!inDraft);
-              }}
-            >
-              {inDraft ? 'Remove from list' : 'Add to list'}
-            </button>
-          </p>
-        </Box>
       </div>
 
       <div className="main_column">
@@ -297,6 +278,23 @@ export function TorrentGroup() {
             Not part of the original archive, may be inaccurate.
           </p>
         )}
+        <p className="center">
+          <button
+            type="button"
+            className="dice-button"
+            style={{ width: 'auto', padding: '0 10px' }}
+            onClick={() => {
+              if (inDraft) {
+                removeFromDraft(release.id);
+              } else {
+                addToDraft({ id: release.id, name: release.name, year: release.year, artists: release.artists });
+              }
+              setInDraft(!inDraft);
+            }}
+          >
+            {inDraft ? 'Remove from list' : 'Add to list'}
+          </button>
+        </p>
       </div>
       </div>
     </>

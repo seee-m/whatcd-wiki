@@ -348,6 +348,18 @@
   margin: 0 0 10px 0;
 }
 
+/* global.css's `.sidebar img { max-width: 220px }` is a leftover from the
+   original fixed-width sidebar -- it silently caps the cover/artist photo
+   below the box's actual ~238px content width (10px padding on a 260px
+   box), leaving extra unpadded space on the right that the left/top edges
+   don't have. Removing the cap lets `width: 100%` (set inline on the img)
+   fill the real content width so the padding reads as equal on every
+   side, and a square image's box grows taller to match rather than
+   the image shrinking to fit an unrelated old measurement. */
+.detail-columns .sidebar img {
+  max-width: none;
+}
+
 .detail-columns .main_column {
   float: none;
   width: auto;
