@@ -1,25 +1,28 @@
-# app name must be globally unique on Fly -- change if "whatcd-wiki" is taken
-# (fly launch will offer to rename it interactively the first time).
-app = "whatcd-wiki"
-primary_region = "lhr"
+# fly.toml app configuration file generated for whatcd-wiki-ob-ssg on 2026-08-24T12:18:32Z
+#
+# See https://fly.io/docs/reference/configuration/ for information about how to use this file.
+#
+
+app = 'whatcd-wiki-ob-ssg'
+primary_region = 'ams'
 
 [build]
 
 [env]
-  PORT = "4000"
-  SQLITE_PATH = "/data/whatcd.sqlite"
+  PORT = '4000'
+  SQLITE_PATH = '/data/whatcd.sqlite'
 
 [[mounts]]
-  source = "whatcd_data"
-  destination = "/data"
+  source = 'whatcd_data'
+  destination = '/data'
 
 [http_service]
-  internal_port = 4000
+  internal_port = 8080
   force_https = true
-  auto_stop_machines = "stop"
+  auto_stop_machines = 'stop'
   auto_start_machines = true
   min_machines_running = 0
 
 [[vm]]
-  size = "shared-cpu-1x"
-  memory = "1gb"
+  size = 'shared-cpu-1x'
+  memory = '1gb'
