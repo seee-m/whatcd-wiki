@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { Box } from '../components/Box';
 import wcdLogo from '../assets/wcd-logo.png';
+import newGif from '../assets/new.gif';
 
 const FURTHER_READING = [
   {
@@ -61,6 +62,10 @@ export function Home() {
           </li>
           <li>
             <Link to="/wiki">Wiki</Link> &mdash; 274 preserved help articles
+          </li>
+          <li>
+            <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive{' '}
+            <img src={newGif} alt="New" />
           </li>
         </ul>
       </Box>
