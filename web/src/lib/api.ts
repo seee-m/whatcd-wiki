@@ -135,8 +135,35 @@ export interface WikiArticle {
   body_html: string;
 }
 
+export interface SharedList {
+  id: string;
+  title: string;
+  description: string | null;
+  categoryId: number;
+  categoryName: string;
+  createdAt: string;
+  releases: { id: number; name: string; year: number | null; artists: ArtistRef[] }[];
+}
+
+export interface CreateListRequest {
+  title: string;
+  description?: string;
+  categoryId?: number;
+  releaseIds: number[];
+}
+
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(path);
+  if (!res.ok) throw new Error(`${path} -> ${res.status}`);
+  return res.json() as Promise<T>;
+}
+
+async function post<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) throw new Error(`${path} -> ${res.status}`);
   return res.json() as Promise<T>;
 }
@@ -160,4 +187,7 @@ export const api = {
   ),
   wikiIndex: () => get<{ items: WikiIndexItem[] }>('/api/wiki'),
   wikiArticle: (id: number | string) => get<WikiArticle>(`/api/wiki/${id}`),
+  createList: (body: CreateListRequest) => post<{ id: string }>('/api/lists', body),
+  list: (id: string) => get<SharedList>(`/api/lists/${id}`),
+  visitorsToday: () => get<{ count: number }>('/api/visitors-today'),
 };

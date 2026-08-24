@@ -8,6 +8,8 @@ import artistsRoutes from './routes/artists.js';
 import collagesRoutes from './routes/collages.js';
 import tagsRoutes from './routes/tags.js';
 import wikiRoutes from './routes/wiki.js';
+import listsRoutes from './routes/lists.js';
+import visitorsRoutes from './routes/visitors.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -24,6 +26,8 @@ await app.register(artistsRoutes);
 await app.register(collagesRoutes);
 await app.register(tagsRoutes);
 await app.register(wikiRoutes);
+await app.register(listsRoutes);
+await app.register(visitorsRoutes);
 
 // In production this process also serves the built React app (web/dist),
 // so the deployed unit is one Node process + one SQLite file -- see the

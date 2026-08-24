@@ -4,6 +4,7 @@ import { api, type ReleaseDetail, type TorrentEdition, type ReleaseExtras } from
 import { Box } from '../components/Box';
 import { parseFileList, formatBytes } from '../lib/fileList';
 import { youtubeEmbedUrl } from '../lib/youtube';
+import { addToDraft, removeFromDraft, isInDraft } from '../lib/listDraft';
 
 const noartworkModules = import.meta.glob('../assets/noartwork/*.png', { eager: true, import: 'default' }) as Record<
   string,
@@ -80,6 +81,7 @@ export function TorrentGroup() {
   const [coverSource, setCoverSource] = useState<string | null>(null);
   const [extras, setExtras] = useState<ReleaseExtras | null>(null);
   const [activeVideo, setActiveVideo] = useState(0);
+  const [inDraft, setInDraft] = useState(false);
 
   useEffect(() => {
     if (!id) return;
@@ -87,7 +89,10 @@ export function TorrentGroup() {
     setCoverSource(null);
     setExtras(null);
     setActiveVideo(0);
-    api.torrent(id).then(setRelease);
+    api.torrent(id).then((r) => {
+      setRelease(r);
+      setInDraft(isInDraft(r.id));
+    });
     // Lazy, cached-on-first-view lookups, music releases only (see
     // routes/torrents.ts) -- failures/non-music just leave no result.
     api
@@ -218,6 +223,25 @@ export function TorrentGroup() {
             </ul>
           </Box>
         )}
+        <Box title="Your list">
+          <p className="center">
+            <button
+              type="button"
+              className="dice-button"
+              style={{ width: 'auto', padding: '0 10px' }}
+              onClick={() => {
+                if (inDraft) {
+                  removeFromDraft(release.id);
+                } else {
+                  addToDraft({ id: release.id, name: release.name, year: release.year, artists: release.artists });
+                }
+                setInDraft(!inDraft);
+              }}
+            >
+              {inDraft ? 'Remove from list' : 'Add to list'}
+            </button>
+          </p>
+        </Box>
       </div>
 
       <div className="main_column">

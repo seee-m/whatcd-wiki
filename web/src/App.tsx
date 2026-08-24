@@ -10,6 +10,8 @@ import { Collage } from './pages/Collage';
 import { Tags } from './pages/Tags';
 import { Wiki } from './pages/Wiki';
 import { WikiArticle } from './pages/WikiArticle';
+import { ListDraft } from './pages/ListDraft';
+import { SharedList } from './pages/SharedList';
 
 export function App() {
   return (
@@ -25,6 +27,8 @@ export function App() {
         <Route path="/tags" element={<Tags />} />
         <Route path="/wiki" element={<Wiki />} />
         <Route path="/wiki/:id" element={<WikiArticle />} />
+        <Route path="/list" element={<ListDraft />} />
+        <Route path="/lists/:id" element={<SharedList />} />
       </Routes>
     </Layout>
   );

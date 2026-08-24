@@ -44,6 +44,21 @@ db.exec(`
   )
 `);
 
+// User-created shareable release lists -- release_ids is a comma-separated
+// list of integers rather than a collage_releases-style join table. Lists
+// are small (capped) and never queried by "which lists contain release X",
+// so a join table would only add row/index overhead for no benefit.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS shared_lists (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL,
+    description TEXT,
+    category_id INTEGER NOT NULL DEFAULT 0,
+    release_ids TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  )
+`);
+
 export type SqlParam = string | number | bigint | null;
 
 export const CATEGORIES = [

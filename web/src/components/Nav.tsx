@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/logo.png';
 import { api } from '../lib/api';
+import { getDraft, onDraftChange } from '../lib/listDraft';
 
 // Mirrors Gazelle's real #menu structure: one <li id="nav_x"> per section,
 // highlighted via body#x #nav_x (see shiro.css). Home/Torrents/Collages/Wiki
@@ -92,6 +93,40 @@ function RandomTorrentButton() {
   );
 }
 
+function ListDraftButton() {
+  const [count, setCount] = useState(0);
+
+  useEffect(() => {
+    const update = () => setCount(getDraft().length);
+    update();
+    return onDraftChange(update);
+  }, []);
+
+  return (
+    <Link to="/list" className="dice-button" title="Your list" aria-label="Your list">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M3 12h.01" />
+        <path d="M3 18h.01" />
+        <path d="M3 6h.01" />
+        <path d="M8 12h13" />
+        <path d="M8 18h13" />
+        <path d="M8 6h13" />
+      </svg>
+      {count > 0 && <span className="list-draft-badge">{count}</span>}
+    </Link>
+  );
+}
+
 function ArtistsSearch() {
   const [q, setQ] = useState('');
   const navigate = useNavigate();
@@ -170,6 +205,9 @@ export function Nav() {
               <form onSubmit={(e) => e.preventDefault()}>
                 <input type="text" placeholder="Users" size={20} disabled className="inert-input" />
               </form>
+            </li>
+            <li>
+              <ListDraftButton />
             </li>
           </ul>
         </div>

@@ -48,6 +48,20 @@
   font-size: 0.9em;
 }
 
+/* shiro.css's own #footer padding is `1em 0` -- with body's margin/padding
+   zeroed globally, that 1em is the *only* space below the footer text and
+   the viewport edge on short pages. Bumped just the bottom for breathing
+   room. */
+#footer {
+  padding-bottom: 2em;
+}
+
+.visitor-count {
+  display: block;
+  font-size: 0.9em;
+  margin-bottom: 0.3em;
+}
+
 /* shiro.css lays #userinfo/#logo/#menu/#searchbars out with
    position:absolute + hand-guessed top/left pixel offsets, sized to fit
    whatever fixed chrome the original page had around them. Recreating
@@ -200,6 +214,7 @@
    box height) so the two can never drift apart, then goes square off that
    height. */
 .dice-button {
+  position: relative;
   width: var(--searchbar-control-height);
   height: var(--searchbar-control-height);
   box-sizing: border-box;
@@ -211,10 +226,27 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  text-decoration: none;
 }
 .dice-button svg {
   width: 20px;
   height: 20px;
+}
+
+/* Draft-count pill on the "your list" nav button. */
+.list-draft-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 3px;
+  border-radius: 8px;
+  background-color: #a33;
+  color: #fff;
+  font-size: 0.7em;
+  line-height: 16px;
+  text-align: center;
 }
 
 /* Pairs the dice button with the Torrents field it modifies. Needs the
