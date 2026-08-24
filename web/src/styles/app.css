@@ -162,12 +162,13 @@
 
 /* Full-bleed background (matches #content/#footer already spanning edge
    to edge), with just the search boxes themselves centered inside. Extra
-   top/bottom padding beyond shiro's own 4px so the boxes don't crowd the
-   #menu row right above them. */
+   top padding beyond shiro's own 4px so the boxes don't crowd the #menu
+   row right above them; bottom padding stays close to shiro's own value
+   since #content already adds its own top padding below this row. */
 #searchbars {
   position: static;
   width: auto;
-  padding: 14px 0;
+  padding: 14px 0 6px;
 }
 
 .searchbars-inner {
@@ -213,7 +214,7 @@
 #content {
   position: static;
   top: auto;
-  padding-top: 28px;
+  padding-top: 16px;
   padding-bottom: 30px;
 }
 

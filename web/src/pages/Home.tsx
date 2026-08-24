@@ -1,5 +1,6 @@
 import { Link } from 'react-router-dom';
 import { Box } from '../components/Box';
+import wcdLogo from '../assets/wcd-logo.png';
 
 const FURTHER_READING = [
   {
@@ -74,6 +75,17 @@ export function Home() {
             </li>
           ))}
         </ul>
+      </Box>
+
+      <Box title="About">
+        <p>
+          Project built and maintained by{' '}
+          <a href="https://www.c-m.work" target="_blank" rel="noopener noreferrer">
+            www.c-m.work
+          </a>{' '}
+          &mdash; send emails to <a href="mailto:what@c-m.work">what@c-m.work</a>
+        </p>
+        <img src={wcdLogo} alt="WCD - Music on the Internet" width={128} />
       </Box>
     </div>
   );
