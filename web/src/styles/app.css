@@ -602,6 +602,20 @@
   margin: 0;
 }
 
+/* Sized to the surrounding text's cap height (not its full line-height,
+   which includes ascender/descender space well above/below the capital
+   letters) and set on the baseline like the text itself, so a small inline
+   badge reads as sitting on the same line rather than floating above or
+   sinking below it. `cap` falls back to the `em` value on browsers that
+   don't parse it (an unsupported unit invalidates just that one
+   declaration, leaving the earlier one in effect). */
+.new-badge {
+  vertical-align: baseline;
+  height: 0.9em;
+  height: 1.25cap;
+  width: auto;
+}
+
 .clear-filter {
   font-size: 0.7em;
   font-weight: normal;

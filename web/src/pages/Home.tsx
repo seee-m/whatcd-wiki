@@ -65,7 +65,7 @@ export function Home() {
           </li>
           <li>
             <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive{' '}
-            <img src={newGif} alt="New" />
+            <img src={newGif} alt="New" className="new-badge" />
           </li>
         </ul>
       </Box>
