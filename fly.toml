@@ -1,7 +1,8 @@
-# app name must be globally unique on Fly -- change if "whatcd-wiki" is taken
-# (fly launch will offer to rename it interactively the first time).
-app = "whatcd-wiki"
-primary_region = "lhr"
+# Named whatcd-wiki-ob-ssg (Fly auto-suffixed it) via the GitHub launcher,
+# region ams -- matching the actual deployed app so `fly deploy` from here
+# stays consistent with it instead of fighting the launcher's choices.
+app = "whatcd-wiki-ob-ssg"
+primary_region = "ams"
 
 [build]
 
@@ -12,6 +13,10 @@ primary_region = "lhr"
 [[mounts]]
   source = "whatcd_data"
   destination = "/data"
+  # Only used if the volume needs recreating -- the launcher ignored this
+  # and made a 1GB volume, since too small for the 3.9GB db; see the
+  # `fly volumes extend` step in the deploy notes.
+  initial_size = 10
 
 [http_service]
   internal_port = 4000
