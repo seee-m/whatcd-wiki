@@ -7,12 +7,18 @@ import { Pagination } from '../components/Pagination';
 export function CollagesBrowse() {
   const [params, setParams] = useSearchParams();
   const [data, setData] = useState<CollageList | null>(null);
+  const [categories, setCategories] = useState<{ id: number; name: string }[]>([]);
   const q = params.get('q') ?? '';
   const sort = params.get('sort') ?? 'name_asc';
+  const category = params.get('category') ?? '';
 
   useEffect(() => {
     api.collages(params).then(setData);
   }, [params]);
+
+  useEffect(() => {
+    api.collageCategories().then(setCategories);
+  }, []);
 
   function update(next: Record<string, string | null>) {
     const p = new URLSearchParams(params);
@@ -39,6 +45,14 @@ export function CollagesBrowse() {
           <select value={sort} onChange={(e) => update({ sort: e.target.value })}>
             <option value="name_asc">Name A-Z</option>
             <option value="name_desc">Name Z-A</option>
+          </select>{' '}
+          <select value={category} onChange={(e) => update({ category: e.target.value })}>
+            <option value="">All categories</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
           </select>
         </p>
       </Box>

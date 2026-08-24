@@ -152,6 +152,7 @@ export const api = {
   artist: (id: number | string) => get<ArtistDetail>(`/api/artists/${id}`),
   artistInfo: (id: number | string) => get<ArtistInfo>(`/api/artists/${id}/info`),
   collages: (params: URLSearchParams) => get<CollageList>(`/api/collages?${params}`),
+  collageCategories: () => get<{ id: number; name: string }[]>('/api/collage-categories'),
   collage: (id: number | string) => get<CollageDetail>(`/api/collages/${id}`),
   tags: (params: URLSearchParams) => get<{ page: number; pageSize: number; total: number; items: TagListItem[] }>(
     `/api/tags?${params}`,

@@ -1,5 +1,5 @@
 import type { FastifyInstance } from 'fastify';
-import { db, collageCategoryName, type SqlParam } from '../db.js';
+import { db, collageCategoryName, COLLAGE_CATEGORIES, type SqlParam } from '../db.js';
 
 // collages.tag_list is denormalized text using the same dot-separated word
 // convention as the canonical tags.name column (e.g. "hip.hop",
@@ -23,10 +23,15 @@ function resolveTagList(db: import('node:sqlite').DatabaseSync, tagList: string)
 const PAGE_SIZE = 50;
 
 export default async function collagesRoutes(app: FastifyInstance) {
+  app.get('/api/collage-categories', async () =>
+    Object.entries(COLLAGE_CATEGORIES).map(([id, name]) => ({ id: Number(id), name })),
+  );
+
   app.get('/api/collages', async (req) => {
     const q = req.query as Record<string, string | undefined>;
     const page = Math.max(1, Number(q.page) || 1);
     const search = (q.q ?? '').trim();
+    const category = q.category !== undefined && q.category !== '' ? Number(q.category) : undefined;
     const sort = q.sort === 'name_desc' ? 'c.name COLLATE NOCASE DESC' : 'c.name COLLATE NOCASE ASC';
 
     let fromClause = 'FROM collages c';
@@ -36,6 +41,10 @@ export default async function collagesRoutes(app: FastifyInstance) {
       fromClause = 'FROM collages_fts f JOIN collages c ON c.id = f.rowid';
       where.push('f.name MATCH ?');
       params.push(search.split(/\s+/).map((t) => `${t}*`).join(' '));
+    }
+    if (category !== undefined && Number.isInteger(category)) {
+      where.push('c.category_id = ?');
+      params.push(category);
     }
     const whereClause = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
