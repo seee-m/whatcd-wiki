@@ -1,0 +1,9 @@
+node_modules
+api/dist
+web/dist
+data
+whatcd-goodbye
+.git
+.env
+api/.env
+.claude

@@ -161,10 +161,13 @@
 }
 
 /* Full-bleed background (matches #content/#footer already spanning edge
-   to edge), with just the search boxes themselves centered inside. */
+   to edge), with just the search boxes themselves centered inside. Extra
+   top/bottom padding beyond shiro's own 4px so the boxes don't crowd the
+   #menu row right above them. */
 #searchbars {
   position: static;
   width: auto;
+  padding: 14px 0;
 }
 
 .searchbars-inner {
@@ -172,17 +175,21 @@
   margin: 0 auto;
 }
 
-/* shiro.css's #searchbars input has no explicit width, so it falls back to
-   the browser's default text-input size -- noticeably narrower here than
-   this app's own page-level search boxes (e.g. Torrents browse's "Search
-   releases..." box, ~150px). Matched to that width for a consistent,
-   "classic search box" size across the whole app; Users keeps its
-   slightly-wider real-site proportion (size 20 vs 17 for the rest). */
+/* shiro.css's #searchbars input padding (3px 3px 3px 5px) makes for a
+   noticeably flatter box than the #menu buttons above it -- matched to
+   that button's own vertical padding (0.45em, see #menu ul li a) so the
+   two rows read as the same "control height". Width capped well below
+   this app's page-level search boxes (~150px) -- full-size there reads
+   fine as one box in a page, but four of them side by side in this
+   header row need to stay compact. */
 #searchbars input {
-  width: 150px;
+  width: 110px;
+  padding: 8px 8px;
+  font-size: 1em;
+  box-sizing: border-box;
 }
 #searchbars li:last-child input {
-  width: 175px;
+  width: 130px;
 }
 
 .searchbars-inner ul {
@@ -193,7 +200,7 @@
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
-  gap: 4px;
+  gap: 14px;
   list-style: none;
   margin: 0;
   padding: 0;
