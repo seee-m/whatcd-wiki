@@ -4,8 +4,9 @@ import { db, collageCategoryName, type SqlParam } from '../db.js';
 // collages.tag_list is denormalized text using the same dot-separated word
 // convention as the canonical tags.name column (e.g. "hip.hop",
 // "avant.garde") -- resolve each raw token against tags to find its real
-// id (so it can link to /torrents?tag=id, same as release tags), and only
-// convert dots to spaces for the *display* label.
+// id (so it can link to /torrents?tag=id, same as release tags). Displayed
+// as-is, dot included -- the real site showed tag names in this exact
+// dotted form, not with spaces substituted in.
 function resolveTagList(db: import('node:sqlite').DatabaseSync, tagList: string): { id: number | null; name: string }[] {
   if (!tagList) return [];
   const tokens = [...new Set(tagList.split(/\s+/).filter(Boolean))];
@@ -16,7 +17,7 @@ function resolveTagList(db: import('node:sqlite').DatabaseSync, tagList: string)
     name: string;
   }[];
   const byName = new Map(rows.map((r) => [r.name, r.id]));
-  return tokens.map((t) => ({ id: byName.get(t) ?? null, name: t.replace(/[._]/g, ' ') }));
+  return tokens.map((t) => ({ id: byName.get(t) ?? null, name: t }));
 }
 
 const PAGE_SIZE = 50;

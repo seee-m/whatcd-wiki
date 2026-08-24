@@ -114,6 +114,19 @@ export default async function artistsRoutes(app: FastifyInstance) {
       return { error: 'not found' };
     }
 
+    // Photo/bio lookup is music-only -- an artist whose only credits are
+    // e-books/apps/etc. isn't a "musical artist" Wikipedia would even
+    // have a page for, and searching one up by name would just add noise.
+    const hasMusicRelease = db
+      .prepare(
+        `SELECT 1 FROM release_artists ra JOIN releases r ON r.id = ra.release_id
+         WHERE ra.artist_id = ? AND r.category_id = 1 LIMIT 1`,
+      )
+      .get(id);
+    if (!hasMusicRelease) {
+      return { bio: null, image: null, source: null };
+    }
+
     const result = await fetchArtistInfo(artist.name);
 
     db.prepare(

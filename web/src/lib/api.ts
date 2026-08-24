@@ -10,6 +10,11 @@ export interface Category {
   icon: string;
 }
 
+export interface ReleaseType {
+  id: number;
+  name: string;
+}
+
 export interface ReleaseListItem {
   id: number;
   name: string;
@@ -77,6 +82,11 @@ export interface ArtistInfo {
   source: string | null;
 }
 
+export interface ReleaseExtras {
+  discogsUrl: string | null;
+  videos: { url: string; title: string }[];
+}
+
 export interface CollageListItem {
   id: number;
   name: string;
@@ -133,9 +143,11 @@ async function get<T>(path: string): Promise<T> {
 
 export const api = {
   categories: () => get<Category[]>('/api/categories'),
+  releaseTypes: () => get<ReleaseType[]>('/api/release-types'),
   torrents: (params: URLSearchParams) => get<ReleaseList>(`/api/torrents?${params}`),
   torrent: (id: number | string) => get<ReleaseDetail>(`/api/torrents/${id}`),
   torrentCover: (id: number | string) => get<{ url: string | null; source?: string }>(`/api/torrents/${id}/cover`),
+  torrentExtras: (id: number | string) => get<ReleaseExtras>(`/api/torrents/${id}/extras`),
   artistSearch: (q: string) => get<{ items: ArtistRef[] }>(`/api/artists/search?q=${encodeURIComponent(q)}`),
   artist: (id: number | string) => get<ArtistDetail>(`/api/artists/${id}`),
   artistInfo: (id: number | string) => get<ArtistInfo>(`/api/artists/${id}/info`),

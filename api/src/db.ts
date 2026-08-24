@@ -35,6 +35,15 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS release_extras (
+    release_id INTEGER PRIMARY KEY,
+    discogs_url TEXT,
+    videos TEXT,
+    fetched_at TEXT NOT NULL
+  )
+`);
+
 export type SqlParam = string | number | bigint | null;
 
 export const CATEGORIES = [

@@ -49,7 +49,7 @@ function TorrentsSearch() {
   };
   return (
     <form onSubmit={onSubmit}>
-      <input type="text" placeholder="Torrents" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="text" placeholder="Torrents" size={17} value={q} onChange={(e) => setQ(e.target.value)} />
     </form>
   );
 }
@@ -63,7 +63,7 @@ function ArtistsSearch() {
   };
   return (
     <form onSubmit={onSubmit}>
-      <input type="text" placeholder="Artists" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input type="text" placeholder="Artists" size={17} value={q} onChange={(e) => setQ(e.target.value)} />
     </form>
   );
 }
@@ -124,12 +124,12 @@ export function Nav() {
             </li>
             <li>
               <form onSubmit={(e) => e.preventDefault()}>
-                <input type="text" placeholder="Forums" disabled className="inert-input" />
+                <input type="text" placeholder="Forums" size={17} disabled className="inert-input" />
               </form>
             </li>
             <li>
               <form onSubmit={(e) => e.preventDefault()}>
-                <input type="text" placeholder="Users" disabled className="inert-input" />
+                <input type="text" placeholder="Users" size={20} disabled className="inert-input" />
               </form>
             </li>
           </ul>

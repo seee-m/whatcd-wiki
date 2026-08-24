@@ -1,6 +1,12 @@
 import type { FastifyInstance } from 'fastify';
-import { db, CATEGORIES, categoryName, releaseTypeName, type SqlParam } from '../db.js';
+import { db, CATEGORIES, categoryName, RELEASE_TYPES, releaseTypeName, type SqlParam } from '../db.js';
 import { fetchCover } from '../cover.js';
+import { fetchDiscogsExtras } from '../discogsRelease.js';
+
+// Cover art / videos / Discogs links only make sense for music -- an
+// e-book or application release has no "album art" or "Discogs release"
+// to look up, and searching one up by name would just return noise.
+const MUSIC_CATEGORY_ID = 1;
 
 const PAGE_SIZE = 50;
 
@@ -50,6 +56,9 @@ function artistsForReleases(releaseIds: number[]) {
 
 export default async function torrentsRoutes(app: FastifyInstance) {
   app.get('/api/categories', async () => CATEGORIES);
+  app.get('/api/release-types', async () =>
+    Object.entries(RELEASE_TYPES).map(([id, name]) => ({ id: Number(id), name })),
+  );
 
   app.get('/api/torrents', async (req) => {
     const q = req.query as Record<string, string | undefined>;
@@ -59,6 +68,7 @@ export default async function torrentsRoutes(app: FastifyInstance) {
       .map((s) => Number(s))
       .filter((n) => Number.isInteger(n) && n > 0);
     const tagId = q.tag ? Number(q.tag) : undefined;
+    const releaseType = q.type ? Number(q.type) : undefined;
     const search = (q.q ?? '').trim();
 
     const where: string[] = [];
@@ -67,6 +77,10 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     if (categories.length > 0) {
       where.push(`r.category_id IN (${categories.map(() => '?').join(',')})`);
       params.push(...categories);
+    }
+    if (releaseType) {
+      where.push('r.release_type = ?');
+      params.push(releaseType);
     }
     if (tagId) {
       where.push('EXISTS (SELECT 1 FROM release_tags rt WHERE rt.release_id = r.id AND rt.tag_id = ?)');
@@ -195,10 +209,15 @@ export default async function torrentsRoutes(app: FastifyInstance) {
       return cached.cover_url ? { url: cached.cover_url, source: cached.source } : { url: null };
     }
 
-    const release = db.prepare('SELECT name FROM releases WHERE id = ?').get(id) as { name: string } | undefined;
+    const release = db.prepare('SELECT name, category_id FROM releases WHERE id = ?').get(id) as
+      | { name: string; category_id: number }
+      | undefined;
     if (!release) {
       reply.code(404);
       return { error: 'not found' };
+    }
+    if (release.category_id !== MUSIC_CATEGORY_ID) {
+      return { url: null };
     }
     const primaryArtist = db
       .prepare(
@@ -214,5 +233,44 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     ).run(id, result?.url ?? null, result?.source ?? null, new Date().toISOString());
 
     return result ? { url: result.url, source: result.source } : { url: null };
+  });
+
+  app.get('/api/torrents/:id/extras', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+
+    const cached = db.prepare('SELECT discogs_url, videos FROM release_extras WHERE release_id = ?').get(id) as
+      | { discogs_url: string | null; videos: string | null }
+      | undefined;
+    if (cached) {
+      return {
+        discogsUrl: cached.discogs_url,
+        videos: cached.videos ? (JSON.parse(cached.videos) as { url: string; title: string }[]) : [],
+      };
+    }
+
+    const release = db.prepare('SELECT name, category_id FROM releases WHERE id = ?').get(id) as
+      | { name: string; category_id: number }
+      | undefined;
+    if (!release) {
+      reply.code(404);
+      return { error: 'not found' };
+    }
+    if (release.category_id !== MUSIC_CATEGORY_ID) {
+      return { discogsUrl: null, videos: [] };
+    }
+    const primaryArtist = db
+      .prepare(
+        `SELECT a.name FROM release_artists ra JOIN artists a ON a.id = ra.artist_id
+         WHERE ra.release_id = ? AND ra.importance = 1 ORDER BY a.name LIMIT 1`,
+      )
+      .get(id) as { name: string } | undefined;
+
+    const result = await fetchDiscogsExtras(primaryArtist?.name ?? '', release.name).catch(() => null);
+
+    db.prepare(
+      'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at) VALUES (?, ?, ?, ?)',
+    ).run(id, result?.discogsUrl ?? null, result ? JSON.stringify(result.videos) : null, new Date().toISOString());
+
+    return { discogsUrl: result?.discogsUrl ?? null, videos: result?.videos ?? [] };
   });
 }

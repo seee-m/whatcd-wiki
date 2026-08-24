@@ -143,3 +143,12 @@ CREATE TABLE artist_info (
   source TEXT,
   fetched_at TEXT NOT NULL
 );
+
+-- Discogs release link + videos (see api/src/discogsRelease.ts). videos is
+-- a JSON array of {url, title}.
+CREATE TABLE release_extras (
+  release_id INTEGER PRIMARY KEY,
+  discogs_url TEXT,
+  videos TEXT,
+  fetched_at TEXT NOT NULL
+);

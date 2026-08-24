@@ -172,6 +172,19 @@
   margin: 0 auto;
 }
 
+/* shiro.css's #searchbars input has no explicit width, so it falls back to
+   the browser's default text-input size -- noticeably narrower here than
+   this app's own page-level search boxes (e.g. Torrents browse's "Search
+   releases..." box, ~150px). Matched to that width for a consistent,
+   "classic search box" size across the whole app; Users keeps its
+   slightly-wider real-site proportion (size 20 vs 17 for the rest). */
+#searchbars input {
+  width: 150px;
+}
+#searchbars li:last-child input {
+  width: 175px;
+}
+
 .searchbars-inner ul {
   align-items: center;
 }
@@ -288,12 +301,17 @@
 }
 
 /* Category checkboxes (mirrors sections/torrents/browse.php's filter_cat[]) */
+.filter_torrents .cat_list td {
+  white-space: nowrap;
+}
+
 .filter_torrents .cat_list label {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   margin: 0 10px;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .filter_torrents .cat_list img {
@@ -432,21 +450,109 @@
   flex-wrap: wrap;
   gap: 4px 10px;
   font-style: normal;
+  padding-left: 0;
 }
 
 .tags a:hover {
   color: #222;
 }
 
-/* Marks the artist photo/bio box as a substitute, not original archive
-   content -- see api/src/artistInfo.ts. */
-.artist-info-disclaimer {
+/* Marks any lazily-fetched external content (artist photo/bio, cover art,
+   Discogs videos/link) as a substitute, not original archive content --
+   see api/src/{artistInfo,cover,discogsRelease}.ts. Used two ways: as a
+   plain paragraph inside a box's .body (artist info), and as a sibling
+   directly under the Release info box on release pages -- the negative
+   top margin there pulls it up close to the box above it. */
+.external-disclaimer {
   font-size: 0.85em;
   color: #888;
-  margin-top: 6px;
+  margin: 6px 0 0 0;
+}
+.box + .external-disclaimer {
+  margin: -4px 0 10px 2px;
 }
 
 .clear-filter {
   font-size: 0.7em;
   font-weight: normal;
+}
+
+.video-embed {
+  position: relative;
+  width: 100%;
+  padding-top: 56.25%; /* 16:9 */
+  margin-bottom: 8px;
+}
+
+.video-embed iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border: 1px solid #BBB;
+}
+
+.video-switcher {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.video-switcher li {
+  margin: 0;
+  padding: 4px 6px;
+  border-bottom: 1px solid #BBB;
+}
+
+.video-switcher li:last-child {
+  border-bottom: none;
+}
+
+.video-switcher li.active {
+  background: #CCC;
+  font-weight: bold;
+}
+
+.video-switcher a {
+  display: block;
+}
+
+/* Box header: title on the left, collapse toggle (+ any supplementary
+   `right` content) on the right -- shiro's own .head is a plain block, so
+   this only adds the flex layout on top of its existing padding/border/
+   background. */
+.head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.box-head-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+/* Hidden by default -- only .sidebar boxes (Cover, Discogs, Artists,
+   etc.) get the collapse toggle; main-column boxes (Torrents, Release
+   info) don't. .head's own 4px padding (shiro.css) already insets this
+   from the right edge by the same amount the title is inset from the
+   left, since both sit in the same flex row. */
+.box-toggle {
+  display: none;
+  color: #444;
+  text-decoration: none;
+  font-size: 0.65em;
+  cursor: pointer;
+}
+
+.sidebar .box-toggle {
+  display: inline-block;
+}
+
+.box-toggle:hover {
+  color: #222;
 }

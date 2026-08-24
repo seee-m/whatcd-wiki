@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { api, type ReleaseDetail, type TorrentEdition } from '../lib/api';
+import { api, type ReleaseDetail, type TorrentEdition, type ReleaseExtras } from '../lib/api';
 import { Box } from '../components/Box';
 import { parseFileList, formatBytes } from '../lib/fileList';
+import { youtubeEmbedUrl } from '../lib/youtube';
 
 const noartworkModules = import.meta.glob('../assets/noartwork/*.png', { eager: true, import: 'default' }) as Record<
   string,
@@ -76,16 +77,29 @@ export function TorrentGroup() {
   const { id } = useParams();
   const [release, setRelease] = useState<ReleaseDetail | null>(null);
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
+  const [coverSource, setCoverSource] = useState<string | null>(null);
+  const [extras, setExtras] = useState<ReleaseExtras | null>(null);
+  const [activeVideo, setActiveVideo] = useState(0);
 
   useEffect(() => {
     if (!id) return;
     setCoverUrl(null);
+    setCoverSource(null);
+    setExtras(null);
+    setActiveVideo(0);
     api.torrent(id).then(setRelease);
-    // Lazy, cached-on-first-view lookup (MusicBrainz -> iTunes -> Discogs)
-    // -- see api/src/cover.ts. Failures just leave the category placeholder.
+    // Lazy, cached-on-first-view lookups, music releases only (see
+    // routes/torrents.ts) -- failures/non-music just leave no result.
     api
       .torrentCover(id)
-      .then((r) => setCoverUrl(r.url))
+      .then((r) => {
+        setCoverUrl(r.url);
+        setCoverSource(r.source ?? null);
+      })
+      .catch(() => {});
+    api
+      .torrentExtras(id)
+      .then(setExtras)
       .catch(() => {});
   }, [id]);
 
@@ -132,6 +146,58 @@ export function TorrentGroup() {
             }}
           />
         </Box>
+        {extras && (extras.videos.length > 0 || extras.discogsUrl) && (
+            <Box
+              title={
+                <>
+                  Discogs
+                  {extras.discogsUrl && (
+                    <>
+                      {' '}
+                      <a href={extras.discogsUrl} target="_blank" rel="noopener noreferrer">
+                        - View Release
+                      </a>
+                    </>
+                  )}
+                </>
+              }
+            >
+              {extras.videos.length > 0 &&
+                (() => {
+                  const current = extras.videos[activeVideo];
+                  const embedUrl = current && youtubeEmbedUrl(current.url);
+                  return (
+                    <>
+                      {embedUrl && (
+                        <div className="video-embed">
+                          <iframe
+                            src={embedUrl}
+                            title={current.title}
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                          />
+                        </div>
+                      )}
+                      <ul className="video-switcher">
+                        {extras.videos.map((v, i) => (
+                          <li key={v.url} className={i === activeVideo ? 'active' : undefined}>
+                            <a
+                              href="#"
+                              onClick={(e) => {
+                                e.preventDefault();
+                                setActiveVideo(i);
+                              }}
+                            >
+                              {v.title}
+                            </a>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  );
+                })()}
+            </Box>
+        )}
         <Box title="Artists">
           <ul className="nobullet">
             {release.artists.map((a) => (
@@ -196,6 +262,17 @@ export function TorrentGroup() {
             </div>
           )}
         </Box>
+        {(coverUrl || (extras && (extras.videos.length > 0 || extras.discogsUrl))) && (
+          <p className="external-disclaimer">
+            {coverUrl && (
+              <>
+                Cover art via {coverSource === 'musicbrainz' ? 'MusicBrainz' : coverSource === 'itunes' ? 'iTunes' : 'Discogs'}.{' '}
+              </>
+            )}
+            {extras && (extras.videos.length > 0 || extras.discogsUrl) && <>Videos/release link via Discogs. </>}
+            Not part of the original archive, may be inaccurate.
+          </p>
+        )}
       </div>
       </div>
     </>

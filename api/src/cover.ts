@@ -7,18 +7,7 @@
 // Results are cached in release_covers by the caller (routes/torrents.ts)
 // so none of these ever get hit twice for the same release.
 
-const APP_UA = 'whatcd-wiki-archive/1.0 (+local personal-use archive browser)';
-const FETCH_TIMEOUT_MS = 4000;
-
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import { APP_UA, fetchWithTimeout } from './httpUtil.js';
 
 // MusicBrainz asks for at most ~1 req/sec from unauthenticated clients.
 // A simple serialized delay is enough for a personal app's traffic.

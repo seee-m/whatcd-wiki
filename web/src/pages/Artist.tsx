@@ -38,9 +38,9 @@ export function Artist() {
               <Box title={artist.name}>
                 {info.image && <img src={info.image} alt={artist.name} style={{ width: '100%' }} />}
                 {info.bio && <p>{info.bio}</p>}
-                <p className="artist-info-disclaimer">
+                <p className="external-disclaimer">
                   via {info.source === 'wikipedia' ? 'Wikipedia' : 'Discogs'} &mdash; not part of the original
-                  archive, information may be inaccurate or anachronistic.
+                  archive, information may be inaccurate.
                 </p>
               </Box>
             )}

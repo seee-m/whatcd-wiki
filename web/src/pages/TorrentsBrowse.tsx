@@ -14,6 +14,24 @@ const CATEGORIES = [
   { id: 7, name: 'Comics', icon: 'comics.png' },
 ];
 
+// Mirrors the real Gazelle $ReleaseTypes mapping (classes/config.template)
+// -- see api/src/db.ts RELEASE_TYPES, which the /api/torrents `type` filter
+// matches against.
+const RELEASE_TYPES = [
+  { id: 1, name: 'Album' },
+  { id: 3, name: 'Soundtrack' },
+  { id: 5, name: 'EP' },
+  { id: 6, name: 'Anthology' },
+  { id: 7, name: 'Compilation' },
+  { id: 9, name: 'Single' },
+  { id: 11, name: 'Live album' },
+  { id: 13, name: 'Remix' },
+  { id: 14, name: 'Bootleg' },
+  { id: 15, name: 'Interview' },
+  { id: 16, name: 'Mixtape' },
+  { id: 21, name: 'Unknown' },
+];
+
 const icons = import.meta.glob('../assets/caticons/*.png', { eager: true, import: 'default' }) as Record<
   string,
   string
@@ -31,6 +49,7 @@ export function TorrentsBrowse() {
   const q = params.get('q') ?? '';
   const sort = params.get('sort') ?? 'name_asc';
   const selectedCats = new Set((params.get('category') ?? '').split(',').filter(Boolean).map(Number));
+  const type = params.get('type') ?? '';
   const page = Number(params.get('page') ?? '1');
 
   useEffect(() => {
@@ -101,6 +120,14 @@ export function TorrentsBrowse() {
           </table>
           <p className="center">
             <input type="text" name="q" defaultValue={q} placeholder="Search releases&hellip;" />{' '}
+            <select value={type} onChange={(e) => update({ type: e.target.value || null })}>
+              <option value="">All types</option>
+              {RELEASE_TYPES.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>{' '}
             <select value={sort} onChange={(e) => update({ sort: e.target.value })}>
               <option value="name_asc">Name A-Z</option>
               <option value="name_desc">Name Z-A</option>

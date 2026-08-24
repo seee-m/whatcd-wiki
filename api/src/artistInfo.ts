@@ -1,7 +1,8 @@
 // Best-effort artist photo + short bio, tried in order until something is
 // found:
-//   1. Wikipedia's REST summary API (free, no key, one fast call, returns
-//      an extract AND a thumbnail together -- no per-request rate limit)
+//   1. Wikipedia (free, no key) -- searches restricted to pages using the
+//      "Infobox musical artist" template, so a name collision (e.g. an
+//      artist named after a common word) can't land on an unrelated page
 //   2. Discogs artist search (free, needs DISCOGS_TOKEN) -- image only,
 //      used to fill in a photo when Wikipedia had a bio but no thumbnail
 // This is explicitly a substitute for the site's own editor-curated
@@ -10,18 +11,7 @@
 // Results are cached in artist_info by the caller (routes/artists.ts) so
 // neither provider is ever hit twice for the same artist.
 
-const APP_UA = 'whatcd-wiki-archive/1.0 (+local personal-use archive browser)';
-const FETCH_TIMEOUT_MS = 4000;
-
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
+import { APP_UA, fetchWithTimeout } from './httpUtil.js';
 
 export interface ArtistInfoResult {
   bio: string | null;
@@ -29,8 +19,23 @@ export interface ArtistInfoResult {
   source: string;
 }
 
+async function findMusicArtistTitle(name: string): Promise<string | null> {
+  // hastemplate: restricts results to pages transcluding Infobox musical
+  // artist -- i.e. actual music-artist pages, not a same-named film,
+  // book, place, etc.
+  const query = `${name} hastemplate:"Infobox musical artist"`;
+  const url = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=1&srsearch=${encodeURIComponent(query)}`;
+  const res = await fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } });
+  if (!res.ok) return null;
+  const data = (await res.json()) as { query?: { search?: { title: string }[] } };
+  return data.query?.search?.[0]?.title ?? null;
+}
+
 async function tryWikipedia(name: string): Promise<ArtistInfoResult | null> {
-  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(name)}`;
+  const title = await findMusicArtistTitle(name);
+  if (!title) return null;
+
+  const url = `https://en.wikipedia.org/api/rest_v1/page/summary/${encodeURIComponent(title)}`;
   const res = await fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } });
   if (!res.ok) return null;
   const data = (await res.json()) as {

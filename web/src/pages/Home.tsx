@@ -27,7 +27,7 @@ const FURTHER_READING = [
 export function Home() {
   return (
     <div className="main_column" style={{ margin: '20px auto', float: 'none' }}>
-      <Box title="what.cd (read-only archive)">
+      <Box title="what.cd wiki">
         <p>
           The what.cd wiki is a read-only, semi-faithful recreation of what.cd's browsing experience, built from the
           site's final database export. There is no login, no forum, and nothing here can be downloaded &mdash; it
@@ -37,7 +37,7 @@ export function Home() {
         <p>
           The death of what.cd really did herald the &lsquo;end of an era&rsquo; of music piracy, (perhaps due to
           the prevalence of streaming and new forms of distribution as much as anything else), and though there are
-          still plenty of places you can go to download music for free: nothing else has ever come close to
+          still plenty of places you can go to download music for free, nothing else has ever come close to
           replicating such a large, vibrant and dedicated community.
         </p>
         <p>So long, and thanks for all the fish&hellip;</p>
