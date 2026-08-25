@@ -69,10 +69,14 @@ export function TvSetup() {
     if (yearFrom) filterParams.set('yearFrom', yearFrom);
     if (yearTo) filterParams.set('yearTo', yearTo);
     try {
-      const { id } = await api.tvRandom(filterParams);
+      const { id, poolHealthy, poolThreshold } = await api.tvRandom(filterParams);
       const displayParams = new URLSearchParams(filterParams);
       if (tags.length > 0) displayParams.set('tagNames', tags.map((t) => t.name).join(','));
-      navigate(`/tv/${id}?${displayParams.toString()}`);
+      // poolHealthy/poolThreshold ride along as router state (not URL
+      // params) since they're an ephemeral fact about this one roll, not
+      // a filter -- TvPlay.tsx reads them to show a "this might be slow"
+      // warning on the first release, same as it does after every "Next".
+      navigate(`/tv/${id}?${displayParams.toString()}`, { state: { poolHealthy, poolThreshold } });
     } catch {
       setNoResults(true);
     } finally {

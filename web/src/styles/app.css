@@ -809,3 +809,8 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.tv-warning-icon {
+  float: left;
+  margin: 0 8px 4px 0;
+}

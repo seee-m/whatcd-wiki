@@ -74,6 +74,49 @@ async function checkCandidateForVideo(id: number, name: string): Promise<boolean
   return youtubeVideos.length > 0;
 }
 
+// Samples up to MAX_LIVE_ATTEMPTS never-looked-up releases matching the
+// given filters. Shared by the cold-start path (which awaits it directly)
+// and the background-discovery path below (which doesn't).
+function fetchUncachedCandidates(
+  fromClause: string,
+  whereClause: string,
+  params: SqlParam[],
+): { id: number; name: string }[] {
+  return db
+    .prepare(
+      `SELECT DISTINCT r.id, r.name ${fromClause}
+       LEFT JOIN release_extras re ON re.release_id = r.id
+       ${whereClause} AND re.release_id IS NULL
+       ORDER BY RANDOM() LIMIT ?`,
+    )
+    .all(...params, MAX_LIVE_ATTEMPTS) as { id: number; name: string }[];
+}
+
+// Checks a batch of candidates one at a time, same throttled/sequential
+// pace as before -- the only difference from the old inline loop is that
+// nothing here is awaited by the request handler, so it can't add a
+// single millisecond to the response the caller already got.
+async function discoverCandidatesInBackground(candidates: { id: number; name: string }[]): Promise<void> {
+  for (const candidate of candidates) {
+    try {
+      await checkCandidateForVideo(candidate.id, candidate.name);
+    } catch {
+      // Best-effort background growth -- move on to the next candidate.
+    }
+  }
+}
+
+// Used by the "healthy pool, but this roll landed in the explore slice"
+// case: samples fresh candidates and checks them, entirely after the
+// response for the triggering request has already been sent.
+async function discoverInBackground(fromClause: string, whereClause: string, params: SqlParam[]): Promise<void> {
+  try {
+    await discoverCandidatesInBackground(fetchUncachedCandidates(fromClause, whereClause, params));
+  } catch {
+    // Best-effort background growth.
+  }
+}
+
 export default async function tvRoutes(app: FastifyInstance) {
   app.get('/api/tv/random', async (req, reply) => {
     const q = req.query as Record<string, string | undefined>;
@@ -137,51 +180,61 @@ export default async function tvRoutes(app: FastifyInstance) {
       )
       .all(...params, POOL_HEALTHY_SIZE + 1) as { id: number }[];
 
-    // Healthy pool, and this roll didn't land in the explore slice: sample
-    // uniformly at random from it via SQL and stop -- release_extras is
-    // small relative to releases, so this ORDER BY RANDOM() only ever
-    // sorts the (bounded) matching cache rows, not the whole releases
-    // table.
-    if (cachedMatches.length > POOL_HEALTHY_SIZE && Math.random() >= EXPLORE_PROBABILITY) {
-      const pick = db
-        .prepare(
-          `SELECT DISTINCT r.id ${fromClause}
-           JOIN release_extras re ON re.release_id = r.id
-           ${whereClause} AND re.videos IS NOT NULL AND re.videos != '[]'
-           ORDER BY RANDOM() LIMIT 1`,
-        )
-        .get(...params) as { id: number };
-      return { id: pick.id };
+    const poolIsHealthy = cachedMatches.length > POOL_HEALTHY_SIZE;
+    const shouldExplore = !poolIsHealthy || Math.random() < EXPLORE_PROBABILITY;
+
+    // The actual fix for "Next sometimes takes 10-20s": whenever there's
+    // already *something* to offer (any cached match at all, not just a
+    // fully "healthy" pool), respond immediately and let any discovery
+    // needed for pool growth continue in the background. Previously this
+    // synchronously awaited the whole discovery loop below even on an
+    // already-healthy pool whenever a roll landed in the 20% explore
+    // slice -- despite having a perfectly good cached answer sitting
+    // right there, one in five rolls on a *healthy* tag still paid the
+    // full up-to-6-candidate, throttled-Discogs-call cost before
+    // responding. Nobody should ever have to wait through a Discogs
+    // round-trip just because the pool could stand to be bigger.
+    if (cachedMatches.length > 0) {
+      const pick = poolIsHealthy
+        ? (
+            db
+              .prepare(
+                `SELECT DISTINCT r.id ${fromClause}
+                 JOIN release_extras re ON re.release_id = r.id
+                 ${whereClause} AND re.videos IS NOT NULL AND re.videos != '[]'
+                 ORDER BY RANDOM() LIMIT 1`,
+              )
+              .get(...params) as { id: number }
+          ).id
+        : cachedMatches[Math.floor(Math.random() * cachedMatches.length)].id;
+
+      if (shouldExplore) {
+        void discoverInBackground(fromClause, whereClause, params);
+      }
+      // poolHealthy/poolThreshold let the frontend warn upfront that
+      // "Next" might be slow for this filter combo (see TvPlay.tsx's
+      // warning box) -- this pick was fast either way, but the *next*
+      // roll on the same combo might not be if it's still thin.
+      return { id: pick, poolHealthy: poolIsHealthy, poolThreshold: POOL_HEALTHY_SIZE };
     }
 
-    // Thin pool, or a healthy one that rolled into the explore slice:
-    // sample a few never-looked-up candidates and check them live.
-    // Releases already known to have no videos (release_extras row exists,
-    // but empty) are excluded via the `re.release_id IS NULL` join
-    // condition, so a dead-end release is never retried on a later roll.
-    const candidates = db
-      .prepare(
-        `SELECT DISTINCT r.id, r.name ${fromClause}
-         LEFT JOIN release_extras re ON re.release_id = r.id
-         ${whereClause} AND re.release_id IS NULL
-         ORDER BY RANDOM() LIMIT ?`,
-      )
-      .all(...params, MAX_LIVE_ATTEMPTS) as { id: number; name: string }[];
-
-    const newHits: number[] = [];
-    for (const candidate of candidates) {
-      if (await checkCandidateForVideo(candidate.id, candidate.name)) newHits.push(candidate.id);
+    // Totally cold (zero cached matches): this request has no choice but
+    // to wait for the first live hit, since there's nothing else to
+    // offer -- but it stops as soon as one is found rather than checking
+    // the full batch, and hands off whatever candidates are left to the
+    // same background path once it does.
+    const candidates = fetchUncachedCandidates(fromClause, whereClause, params);
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      if (await checkCandidateForVideo(candidate.id, candidate.name)) {
+        const rest = candidates.slice(i + 1);
+        if (rest.length > 0) void discoverCandidatesInBackground(rest);
+        return { id: candidate.id, poolHealthy: false, poolThreshold: POOL_HEALTHY_SIZE };
+      }
     }
 
-    // Pick uniformly among everything known to work for this filter combo
-    // -- both what was already cached and whatever this roll just found --
-    // rather than always returning the first (or only) fresh hit.
-    const pool = [...cachedMatches.map((m) => m.id), ...newHits];
-    if (pool.length === 0) {
-      reply.code(404);
-      return { error: 'No releases with video found for these filters. Try broadening your search.' };
-    }
-    return { id: pool[Math.floor(Math.random() * pool.length)] };
+    reply.code(404);
+    return { error: 'No releases with video found for these filters. Try broadening your search.' };
   });
 
   // Reports that the video the player just tried to play is actually dead

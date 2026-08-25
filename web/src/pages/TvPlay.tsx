@@ -1,14 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { api, type ReleaseDetail, type ReleaseExtras } from '../lib/api';
 import { Box } from '../components/Box';
 import { addToDraft, removeFromDraft, isInDraft } from '../lib/listDraft';
 import { RELEASE_TYPES } from '../lib/releaseTypes';
 import { loadYouTubeIframeApi, youtubeVideoId, type YouTubePlayer } from '../lib/youtube';
+import warningGif from '../assets/tv-warning.gif';
+
+interface PoolState {
+  healthy: boolean;
+  threshold: number;
+}
 
 export function TvPlay() {
   const { id } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const [params] = useSearchParams();
 
   const [release, setRelease] = useState<ReleaseDetail | null>(null);
@@ -17,6 +24,19 @@ export function TvPlay() {
   const [inDraft, setInDraft] = useState(false);
   const [nextLoading, setNextLoading] = useState(false);
   const [nextError, setNextError] = useState<string | null>(null);
+  // TvSetup.tsx's "Start" already knows whether this filter combo's pool
+  // was healthy (it just made the same /api/tv/random call) and hands
+  // that off via router state -- ephemeral per-roll info, not a filter,
+  // so it doesn't belong in the URL alongside tags/years/types. Absent on
+  // a direct link or a hard refresh (router state doesn't survive those),
+  // in which case null just means "don't know" -- no warning shown rather
+  // than guessing.
+  const initialPool = (location.state as { poolHealthy?: boolean; poolThreshold?: number } | null) ?? null;
+  const [pool, setPool] = useState<PoolState | null>(
+    initialPool && typeof initialPool.poolHealthy === 'boolean' && typeof initialPool.poolThreshold === 'number'
+      ? { healthy: initialPool.poolHealthy, threshold: initialPool.poolThreshold }
+      : null,
+  );
 
   const playerRef = useRef<YouTubePlayer | null>(null);
   const playerElRef = useRef<HTMLDivElement | null>(null);
@@ -52,7 +72,8 @@ export function TvPlay() {
     try {
       const fp = filterParams();
       fp.set('exclude', String(release.id));
-      const { id: newId } = await api.tvRandom(fp);
+      const { id: newId, poolHealthy, poolThreshold } = await api.tvRandom(fp);
+      setPool({ healthy: poolHealthy, threshold: poolThreshold });
       navigate(`/tv/${newId}?${params.toString()}`, { replace: true });
     } catch (err) {
       setNextError(err instanceof Error ? err.message : 'Something went wrong.');
@@ -83,9 +104,6 @@ export function TvPlay() {
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    setRelease(null);
-    setExtras(null);
-    setSong(null);
     setNextError(null);
     api.torrent(id).then((r) => {
       if (cancelled) return;
@@ -99,15 +117,23 @@ export function TvPlay() {
         setExtras(r);
       })
       .catch(() => {});
-    // Without this guard, clicking "Next" again (or the auto-advance
-    // firing) before the previous id's fetches finished let a slow,
-    // stale response resolve *after* the newer one and silently overwrite
-    // correct state with mismatched data -- `release` pointing at the new
-    // pick while `extras`/`song` still held the old one's video, or vice
-    // versa. That inconsistent combination doesn't self-heal (nothing
-    // re-triggers the effects that would fix it), so it just sits there
-    // until a full page reload resets all state -- exactly the "player
-    // doesn't load, but reloading fixes it" symptom this was causing.
+    // Deliberately does NOT null out release/extras/song before the new
+    // ones arrive. That used to seem harmless (just a loading flicker),
+    // but it broke the player on every single "Next": this whole
+    // component returns a bare <p>Loading…</p> while `release` is null,
+    // which unmounts the entire tree -- including the <div> the YouTube
+    // iframe lives inside. React tears that div out of the DOM, but the
+    // YT.Player JS object survives in playerRef with no live iframe left
+    // to control, so the next loadVideoById() call has nothing to update.
+    // Confirmed live: title/artist/tags update correctly on "Next", but
+    // the player area goes completely blank -- exactly this. Leaving the
+    // old release on screen until the new one is ready keeps that div
+    // permanently mounted, so the same player instance can actually be
+    // reused across every "Next" the way the effect below assumes.
+    //
+    // Cancellation guard still matters here independent of that: without
+    // it, a stale response for an old id resolving after a newer one
+    // would silently overwrite correct state with mismatched data.
     return () => {
       cancelled = true;
     };
@@ -264,6 +290,16 @@ export function TvPlay() {
               </button>
             </p>
           </Box>
+
+          {pool && !pool.healthy && (
+            <Box title="Warning" collapsible={false}>
+              <p>
+                <img src={warningGif} alt="" width={28} height={28} className="tv-warning-icon" />
+                Warning, your search has returned fewer than {pool.threshold} results. Surfing might take a long
+                time. Adjust your search parameters or browse <Link to="/tags">tags</Link> to see more.
+              </p>
+            </Box>
+          )}
         </div>
 
         <div className="main_column">

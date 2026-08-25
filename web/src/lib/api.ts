@@ -179,11 +179,13 @@ export const api = {
   // directly to the user instead of a generic "404" failure.
   tvRandom: async (params: URLSearchParams) => {
     const res = await fetch(`/api/tv/random?${params}`);
-    const data = (await res.json().catch(() => null)) as { id: number; error?: string } | null;
+    const data = (await res.json().catch(() => null)) as
+      | { id: number; poolHealthy: boolean; poolThreshold: number; error?: string }
+      | null;
     if (!res.ok) {
       throw new Error(data?.error ?? `tv/random -> ${res.status}`);
     }
-    return data as { id: number };
+    return data as { id: number; poolHealthy: boolean; poolThreshold: number };
   },
   // Fire-and-forget from the player's onError (see pages/TvPlay.tsx) --
   // prunes a rotted video link out of the shared release_extras cache so
