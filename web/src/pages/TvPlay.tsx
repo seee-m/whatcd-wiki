@@ -82,18 +82,35 @@ export function TvPlay() {
   // Discogs/MusicBrainz round trip) for something already on screen.
   useEffect(() => {
     if (!id) return;
+    let cancelled = false;
     setRelease(null);
     setExtras(null);
     setSong(null);
     setNextError(null);
     api.torrent(id).then((r) => {
+      if (cancelled) return;
       setRelease(r);
       setInDraft(isInDraft(r.id));
     });
     api
       .torrentExtras(id)
-      .then(setExtras)
+      .then((r) => {
+        if (cancelled) return;
+        setExtras(r);
+      })
       .catch(() => {});
+    // Without this guard, clicking "Next" again (or the auto-advance
+    // firing) before the previous id's fetches finished let a slow,
+    // stale response resolve *after* the newer one and silently overwrite
+    // correct state with mismatched data -- `release` pointing at the new
+    // pick while `extras`/`song` still held the old one's video, or vice
+    // versa. That inconsistent combination doesn't self-heal (nothing
+    // re-triggers the effects that would fix it), so it just sits there
+    // until a full page reload resets all state -- exactly the "player
+    // doesn't load, but reloading fixes it" symptom this was causing.
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   // Picks one song at random out of the release's videos, once per

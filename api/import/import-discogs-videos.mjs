@@ -9,6 +9,15 @@
 //
 // Usage:
 //   node api/import/import-discogs-videos.mjs /path/to/discogs_20260801_releases.xml.gz
+//   node api/import/import-discogs-videos.mjs "https://data.discogs.com/?download=data%2F2026%2Fdiscogs_20260801_releases.xml.gz"
+//
+// The second form fetches and decompresses the dump in-stream -- the
+// compressed download is never written to disk at all, only the small
+// per-release fields that survive filtering ever get held anywhere. Use
+// it when disk space near the target DB is tight (the dump is ~10GB
+// compressed; there's no reason to spend that just to read through it
+// once). Memory use is the same either way, since both forms build the
+// same in-memory match index -- what changes is disk, not RAM.
 //
 // Two passes:
 //   1. Stream the (multi-GB, gzipped) dump once, building an in-memory
@@ -28,16 +37,20 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
+import { Readable } from 'node:stream';
 
 const DB_PATH =
   process.env.SQLITE_PATH || path.join(os.homedir(), 'Library/Application Support/whatcd-wiki/whatcd.sqlite');
 
-const dumpPath = process.argv[2];
-if (!dumpPath) {
-  console.error('Usage: node import-discogs-videos.mjs /path/to/discogs_YYYYMMDD_releases.xml.gz');
+const dumpSource = process.argv[2];
+if (!dumpSource) {
+  console.error(
+    'Usage: node import-discogs-videos.mjs /path/to/discogs_YYYYMMDD_releases.xml.gz\n' +
+      '   or: node import-discogs-videos.mjs "https://data.discogs.com/?download=...releases.xml.gz"',
+  );
   process.exit(1);
 }
-const dumpDate = (dumpPath.match(/discogs_(\d{8})_releases/) ?? [])[1] ?? 'unknown';
+const dumpDate = (dumpSource.match(/discogs_(\d{8})_releases/) ?? [])[1] ?? 'unknown';
 const SOURCE_TAG = `bulk-${dumpDate}`;
 
 // Same as web/src/lib/youtube.ts / api/src/routes/tv.ts's YOUTUBE_ID_RE --
@@ -98,34 +111,43 @@ function matchKey(artist, title) {
 // hundred bytes to a few KB each, so this stays small throughout. Uses
 // StringDecoder (not chunk.toString()) so a multi-byte UTF-8 character
 // split across two chunks doesn't get corrupted at the boundary.
-async function* releaseBlocks(gzPath) {
+async function* releaseBlocks(source) {
   const gunzip = zlib.createGunzip();
-  fs.createReadStream(gzPath).pipe(gunzip);
+  let src;
+  if (/^https?:\/\//i.test(source)) {
+    // Streams straight from the network into gunzip -- the compressed
+    // dump (~10GB) is never written to disk anywhere. Readable.fromWeb
+    // bridges fetch()'s Web ReadableStream body into a Node stream so it
+    // can be piped like any other source.
+    const res = await fetch(source);
+    if (!res.ok || !res.body) throw new Error(`Failed to fetch dump: HTTP ${res.status}`);
+    src = Readable.fromWeb(res.body);
+  } else {
+    src = fs.createReadStream(source);
+  }
+  // `.pipe()` does NOT forward errors from the source stream to the
+  // destination -- a real Node.js footgun, and the actual cause of a
+  // production crash: a dropped connection mid-download threw an
+  // unhandled 'error' event and killed the whole process instead of
+  // being caught below. Forwarding it into gunzip's own error path means
+  // the existing for-await/catch handles a network drop exactly like a
+  // truncated local file.
+  src.on('error', (err) => gunzip.destroy(err));
+  src.pipe(gunzip);
   const decoder = new StringDecoder('utf8');
   let buffer = '';
-  try {
-    for await (const chunk of gunzip) {
-      buffer += decoder.write(chunk);
-      let start;
-      while ((start = buffer.indexOf('<release ')) !== -1) {
-        const end = buffer.indexOf('</release>', start);
-        if (end === -1) break; // block not fully buffered yet -- wait for more data
-        yield buffer.slice(start, end + '</release>'.length);
-        buffer = buffer.slice(end + '</release>'.length);
-      }
-    }
-  } catch (err) {
-    // A dump cut short mid-download (this happened during testing with a
-    // deliberately-truncated file, but could also happen for real if a
-    // production download gets interrupted) ends the gzip stream with
-    // Z_BUF_ERROR/"unexpected end of file" instead of a clean EOF. Better
-    // to use everything scanned before the cutoff than to throw away a
-    // long-running scan over one truncated tail -- surface it as a
-    // warning and let the generator end normally.
-    if (err?.code === 'Z_BUF_ERROR' || /unexpected end of file/i.test(err?.message ?? '')) {
-      console.warn(`Warning: dump ended unexpectedly (${err.message}) -- using everything scanned up to the cutoff.`);
-    } else {
-      throw err;
+  // No try/catch here -- a dropped connection (or truncated local file)
+  // propagates up to buildIndex, which decides whether to retry (for a
+  // URL source) or just accept partial progress (for a local file, where
+  // re-reading it would hit the identical truncation again).
+  for await (const chunk of gunzip) {
+    buffer += decoder.write(chunk);
+    let start;
+    while ((start = buffer.indexOf('<release ')) !== -1) {
+      const end = buffer.indexOf('</release>', start);
+      if (end === -1) break; // block not fully buffered yet -- wait for more data
+      yield buffer.slice(start, end + '</release>'.length);
+      buffer = buffer.slice(end + '</release>'.length);
     }
   }
 }
@@ -178,34 +200,68 @@ function extractRelease(block) {
   };
 }
 
-async function buildIndex(gzPath) {
+// A dropped connection partway through a ~10GB streamed fetch is a real,
+// observed failure mode (hit it in production: died after 175s/6.4M
+// releases with a socket-closed error). Range requests aren't honored by
+// data.discogs.com (confirmed separately), so there's no way to resume
+// from where it left off -- the only option is restarting the fetch from
+// byte 0. That's fine: already-indexed releases stay in `index` across
+// attempts (just get redundantly re-scanned until the point of the
+// previous failure), so a retry costs time, not progress. Only applies to
+// URL sources -- a truncated local file would hit the identical cutoff
+// again, so that case just accepts partial progress immediately.
+const MAX_FETCH_RETRIES = 5;
+
+async function buildIndex(source) {
   const index = new Map(); // matchKey -> [{ discogsId, year, videos }]
   let scanned = 0;
   let withVideos = 0;
   const startedAt = Date.now();
+  const isUrl = /^https?:\/\//i.test(source);
+  let attempt = 0;
 
-  for await (const block of releaseBlocks(gzPath)) {
-    scanned++;
-    if (scanned % 200_000 === 0) {
-      const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
-      const mem = process.memoryUsage();
-      const rss = (mem.rss / 1024 / 1024).toFixed(0);
-      const heap = (mem.heapUsed / 1024 / 1024).toFixed(0);
-      console.log(
-        `  scanned ${scanned.toLocaleString()} releases (${withVideos.toLocaleString()} with usable video) -- ${elapsed}s -- rss ${rss}MB heap ${heap}MB`,
+  while (true) {
+    try {
+      for await (const block of releaseBlocks(source)) {
+        scanned++;
+        if (scanned % 200_000 === 0) {
+          const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+          const mem = process.memoryUsage();
+          const rss = (mem.rss / 1024 / 1024).toFixed(0);
+          const heap = (mem.heapUsed / 1024 / 1024).toFixed(0);
+          console.log(
+            `  scanned ${scanned.toLocaleString()} releases (${withVideos.toLocaleString()} with usable video) -- ${elapsed}s -- rss ${rss}MB heap ${heap}MB`,
+          );
+        }
+
+        const extracted = extractRelease(block);
+        if (!extracted) continue;
+        withVideos++;
+
+        const entry = { discogsId: extracted.discogsId, year: extracted.year, videos: extracted.videos };
+        for (const artistName of extracted.artistNames) {
+          const key = matchKey(artistName, extracted.title);
+          const bucket = index.get(key);
+          if (bucket) bucket.push(entry);
+          else index.set(key, [entry]);
+        }
+      }
+      break; // the stream ended cleanly -- done
+    } catch (err) {
+      attempt++;
+      console.warn(
+        `Warning: dump stream ended early after ${scanned.toLocaleString()} releases scanned (${err?.message ?? err}).`,
       );
-    }
-
-    const extracted = extractRelease(block);
-    if (!extracted) continue;
-    withVideos++;
-
-    const entry = { discogsId: extracted.discogsId, year: extracted.year, videos: extracted.videos };
-    for (const artistName of extracted.artistNames) {
-      const key = matchKey(artistName, extracted.title);
-      const bucket = index.get(key);
-      if (bucket) bucket.push(entry);
-      else index.set(key, [entry]);
+      if (!isUrl) {
+        console.warn('Local file source -- not retrying (would hit the same cutoff). Using everything scanned so far.');
+        break;
+      }
+      if (attempt > MAX_FETCH_RETRIES) {
+        console.warn(`Giving up after ${MAX_FETCH_RETRIES} retries. Using everything scanned so far.`);
+        break;
+      }
+      console.warn(`Restarting the fetch from the beginning (attempt ${attempt}/${MAX_FETCH_RETRIES})...`);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
 
@@ -238,10 +294,10 @@ function ensureSourceColumn(db) {
 }
 
 async function main() {
-  console.log(`Reading dump: ${dumpPath}`);
+  console.log(`Reading dump: ${dumpSource}`);
   console.log(`Writing to: ${DB_PATH}`);
 
-  const index = await buildIndex(dumpPath);
+  const index = await buildIndex(dumpSource);
 
   const db = new DatabaseSync(DB_PATH);
   ensureSourceColumn(db);
