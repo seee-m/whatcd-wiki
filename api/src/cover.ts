@@ -8,6 +8,7 @@
 // so none of these ever get hit twice for the same release.
 
 import { APP_UA, fetchWithTimeout } from './httpUtil.js';
+import { throttleDiscogs } from './discogsThrottle.js';
 
 // MusicBrainz asks for at most ~1 req/sec from unauthenticated clients.
 // A simple serialized delay is enough for a personal app's traffic.
@@ -40,7 +41,7 @@ async function tryDiscogs(artist: string, title: string): Promise<CoverResult | 
   const token = process.env.DISCOGS_TOKEN;
   if (!token) return null;
   const url = `https://api.discogs.com/database/search?q=${encodeURIComponent(`${artist} ${title}`)}&type=release&token=${token}`;
-  const res = await fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } });
+  const res = await throttleDiscogs(() => fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } }));
   if (!res.ok) return null;
   const data = (await res.json()) as { results?: { cover_image?: string; thumb?: string }[] };
   const art = data.results?.[0]?.cover_image || data.results?.[0]?.thumb;

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, type ReleaseList } from '../lib/api';
 import { Box } from '../components/Box';
 import { Pagination } from '../components/Pagination';
+import { RELEASE_TYPES } from '../lib/releaseTypes';
 
 const CATEGORIES = [
   { id: 1, name: 'Music', icon: 'music.png' },
@@ -12,24 +13,6 @@ const CATEGORIES = [
   { id: 5, name: 'E-Learning Videos', icon: 'elearning.png' },
   { id: 6, name: 'Comedy', icon: 'comedy.png' },
   { id: 7, name: 'Comics', icon: 'comics.png' },
-];
-
-// Mirrors the real Gazelle $ReleaseTypes mapping (classes/config.template)
-// -- see api/src/db.ts RELEASE_TYPES, which the /api/torrents `type` filter
-// matches against.
-const RELEASE_TYPES = [
-  { id: 1, name: 'Album' },
-  { id: 3, name: 'Soundtrack' },
-  { id: 5, name: 'EP' },
-  { id: 6, name: 'Anthology' },
-  { id: 7, name: 'Compilation' },
-  { id: 9, name: 'Single' },
-  { id: 11, name: 'Live album' },
-  { id: 13, name: 'Remix' },
-  { id: 14, name: 'Bootleg' },
-  { id: 15, name: 'Interview' },
-  { id: 16, name: 'Mixtape' },
-  { id: 21, name: 'Unknown' },
 ];
 
 const icons = import.meta.glob('../assets/caticons/*.png', { eager: true, import: 'default' }) as Record<

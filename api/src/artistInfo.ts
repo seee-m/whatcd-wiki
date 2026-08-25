@@ -12,6 +12,7 @@
 // neither provider is ever hit twice for the same artist.
 
 import { APP_UA, fetchWithTimeout } from './httpUtil.js';
+import { throttleDiscogs } from './discogsThrottle.js';
 
 export interface ArtistInfoResult {
   bio: string | null;
@@ -52,7 +53,7 @@ async function tryDiscogsImage(name: string): Promise<string | null> {
   const token = process.env.DISCOGS_TOKEN;
   if (!token) return null;
   const url = `https://api.discogs.com/database/search?q=${encodeURIComponent(name)}&type=artist&token=${token}`;
-  const res = await fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } });
+  const res = await throttleDiscogs(() => fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } }));
   if (!res.ok) return null;
   const data = (await res.json()) as { results?: { cover_image?: string; thumb?: string }[] };
   return data.results?.[0]?.cover_image || data.results?.[0]?.thumb || null;

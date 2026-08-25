@@ -8,6 +8,7 @@
 // (search + release detail) per release, ever.
 
 import { APP_UA, fetchWithTimeout } from './httpUtil.js';
+import { throttleDiscogs } from './discogsThrottle.js';
 
 export interface DiscogsExtras {
   discogsUrl: string;
@@ -19,15 +20,17 @@ export async function fetchDiscogsExtras(artist: string, title: string): Promise
   if (!token) return null;
 
   const searchUrl = `https://api.discogs.com/database/search?q=${encodeURIComponent(`${artist} ${title}`)}&type=release&token=${token}`;
-  const searchRes = await fetchWithTimeout(searchUrl, { headers: { 'User-Agent': APP_UA } });
+  const searchRes = await throttleDiscogs(() => fetchWithTimeout(searchUrl, { headers: { 'User-Agent': APP_UA } }));
   if (!searchRes.ok) return null;
   const searchData = (await searchRes.json()) as { results?: { id?: number }[] };
   const id = searchData.results?.[0]?.id;
   if (!id) return null;
 
-  const detailRes = await fetchWithTimeout(`https://api.discogs.com/releases/${id}?token=${token}`, {
-    headers: { 'User-Agent': APP_UA },
-  });
+  const detailRes = await throttleDiscogs(() =>
+    fetchWithTimeout(`https://api.discogs.com/releases/${id}?token=${token}`, {
+      headers: { 'User-Agent': APP_UA },
+    }),
+  );
   if (!detailRes.ok) return null;
   const detail = (await detailRes.json()) as { videos?: { uri?: string; title?: string }[] };
 

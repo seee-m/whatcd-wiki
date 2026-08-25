@@ -12,6 +12,8 @@ import { Wiki } from './pages/Wiki';
 import { WikiArticle } from './pages/WikiArticle';
 import { ListDraft } from './pages/ListDraft';
 import { SharedList } from './pages/SharedList';
+import { TvSetup } from './pages/TvSetup';
+import { TvPlay } from './pages/TvPlay';
 
 export function App() {
   return (
@@ -29,6 +31,8 @@ export function App() {
         <Route path="/wiki/:id" element={<WikiArticle />} />
         <Route path="/list" element={<ListDraft />} />
         <Route path="/lists/:id" element={<SharedList />} />
+        <Route path="/tv" element={<TvSetup />} />
+        <Route path="/tv/:id" element={<TvPlay />} />
       </Routes>
     </Layout>
   );

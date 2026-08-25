@@ -174,6 +174,21 @@ export const api = {
   torrents: (params: URLSearchParams) => get<ReleaseList>(`/api/torrents?${params}`),
   randomTorrent: () => get<{ id: number }>('/api/torrents/random'),
   torrent: (id: number | string) => get<ReleaseDetail>(`/api/torrents/${id}`),
+  // Not plain `get()` -- a "no matches" 404 carries a human-readable
+  // `error` message (see api/src/routes/tv.ts) that what.tv surfaces
+  // directly to the user instead of a generic "404" failure.
+  tvRandom: async (params: URLSearchParams) => {
+    const res = await fetch(`/api/tv/random?${params}`);
+    const data = (await res.json().catch(() => null)) as { id: number; error?: string } | null;
+    if (!res.ok) {
+      throw new Error(data?.error ?? `tv/random -> ${res.status}`);
+    }
+    return data as { id: number };
+  },
+  // Fire-and-forget from the player's onError (see pages/TvPlay.tsx) --
+  // prunes a rotted video link out of the shared release_extras cache so
+  // it's never served again, for this release or anyone else's.
+  tvReportDeadVideo: (id: number | string, url: string) => post<{ removed: boolean }>(`/api/tv/${id}/video-dead`, { url }),
   torrentCover: (id: number | string) => get<{ url: string | null; source?: string }>(`/api/torrents/${id}/cover`),
   torrentExtras: (id: number | string) => get<ReleaseExtras>(`/api/torrents/${id}/extras`),
   artistSearch: (q: string) => get<{ items: ArtistRef[] }>(`/api/artists/search?q=${encodeURIComponent(q)}`),

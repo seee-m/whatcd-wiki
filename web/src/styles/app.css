@@ -700,3 +700,112 @@
 .box-toggle:hover {
   color: #222;
 }
+
+/* what.tv setup form (pages/TvSetup.tsx) -- one column of stacked boxes,
+   the same fixed width as a normal detail-page sidebar (see
+   .detail-columns .sidebar in the "release page" section above), so the
+   Start button and every box below share one consistent width. */
+.tv-setup-column {
+  width: 260px;
+  margin: 20px auto;
+}
+
+.tv-setup-column > h2 {
+  margin-bottom: 24px;
+}
+
+.tv-setup-column .box {
+  margin: 0 0 10px 0;
+}
+
+.tv-year-range {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.tv-year-range input {
+  width: 110px;
+}
+
+.tv-start-button {
+  display: block;
+  width: 100%;
+  height: auto;
+  padding: 8px 12px;
+  box-sizing: border-box;
+}
+
+.tv-type-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+
+.tv-type-list label {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Tag multi-select (components/TagPicker.tsx). Positioned relative so the
+   suggestion dropdown below can anchor to just this input rather than the
+   whole form. */
+.tag-picker-chips {
+  margin-bottom: 12px;
+}
+
+.tag-picker-input {
+  position: relative;
+}
+
+.tag-picker-suggestions {
+  position: absolute;
+  z-index: 5;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin: 2px 0 0 0;
+  padding: 0;
+  list-style: none;
+  background: #FFF;
+  border: 1px solid #BBB;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.tag-picker-suggestions li {
+  margin: 0;
+}
+
+.tag-picker-suggestions a {
+  display: block;
+  padding: 4px 8px;
+}
+
+.tag-picker-suggestions a:hover {
+  background: #EEE;
+}
+
+/* Radio box (pages/TvPlay.tsx) -- shiro.css's site-wide `td.label` is
+   right-aligned at a fixed 180px, sized for the wide main-column tables it
+   was written for. That's most of this sidebar box's ~240px content width,
+   squeezing the actual values into a thin ragged column -- overridden here
+   to a narrow left-aligned label so the value column (tag/year/type list)
+   gets the room it needs. */
+.tv-radio-table {
+  margin-bottom: 10px;
+}
+
+.tv-radio-table td.label {
+  width: 52px;
+  text-align: left;
+}
+
+.tv-radio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}

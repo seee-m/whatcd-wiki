@@ -21,6 +21,10 @@ const FURTHER_READING = [
     url: 'https://nymag.com/intelligencer/2016/11/the-death-of-what-cd-and-the-end-of-music-torrenting.html',
   },
   {
+    title: "Remembering What.CD, the Internet's Greatest Music Archive",
+    url: 'https://www.vice.com/en/article/remembering-whatcd-the-internets-greatest-music-archive/',
+  },
+  {
     title: 'Torrent Service What.cd Has Shut Down After Raid',
     url: 'https://www.vulture.com/2016/11/torrent-service-whatcd-has-shut-down-after-raid.html',
   },
@@ -65,7 +69,10 @@ export function Home() {
             <Link to="/wiki">Wiki</Link> &mdash; 274 text-only preserved help articles
           </li>
           <li>
-            <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive{' '}
+            <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive
+          </li>
+          <li>
+            <Link to="/tv">what.tv</Link> &mdash; Surf through the what.cd collection using Discogs YouTube embeds{' '}
             <img src={newGif} alt="New" className="new-badge" />
           </li>
         </ul>

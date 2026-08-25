@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import logo from '../assets/logo.png';
+import whatTvLogo from '../assets/whattv-logo.png';
 import { api } from '../lib/api';
 import { getDraft, onDraftChange } from '../lib/listDraft';
 
@@ -93,6 +94,28 @@ function RandomTorrentButton() {
   );
 }
 
+function TvModeButton() {
+  return (
+    <Link to="/tv" className="dice-button" title="what.tv" aria-label="what.tv">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="20"
+        height="20"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.25"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      >
+        <path d="M15.033 9.44a.647.647 0 0 1 0 1.12l-4.065 2.352a.645.645 0 0 1-.968-.56V7.648a.645.645 0 0 1 .967-.56z" />
+        <path d="M7 21h10" />
+        <rect width="20" height="14" x="2" y="3" rx="2" />
+      </svg>
+    </Link>
+  );
+}
+
 function ListDraftButton() {
   const [count, setCount] = useState(0);
 
@@ -144,6 +167,7 @@ function ArtistsSearch() {
 export function Nav() {
   const location = useLocation();
   const active = activeSectionId(location.pathname);
+  const isWhatTv = location.pathname.startsWith('/tv');
 
   return (
     <div id="header">
@@ -168,7 +192,11 @@ export function Nav() {
 
       <div id="logo">
         <Link to="/">
-          <img src={logo} alt="what.cd" width={240} height={70} />
+          {isWhatTv ? (
+            <img src={whatTvLogo} alt="what.tv" width={240} height={70} />
+          ) : (
+            <img src={logo} alt="what.cd" width={240} height={70} />
+          )}
         </Link>
       </div>
 
@@ -191,6 +219,7 @@ export function Nav() {
           <ul>
             <li className="torrents-search-group">
               <RandomTorrentButton />
+              <TvModeButton />
               <TorrentsSearch />
             </li>
             <li>
