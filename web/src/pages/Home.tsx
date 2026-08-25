@@ -49,19 +49,20 @@ export function Home() {
       <Box title="Browse">
         <ul className="plain-list">
           <li>
-            <Link to="/torrents">Browse Torrents</Link> &mdash; releases, filterable by category
+            <Link to="/torrents">Browse Torrents</Link> &mdash; 1M+ music releases, and a variety of other media
           </li>
           <li>
-            <Link to="/artists">Search Artists</Link>
+            <Link to="/artists">Search Artists</Link> &mdash; 885,304 named artists with similarity ranking
           </li>
           <li>
-            <Link to="/collages">Browse Collages</Link>
+            <Link to="/collages">Browse Collages</Link> &mdash; 26,761 user-created collages for discovering new
+            music
           </li>
           <li>
-            <Link to="/tags">Browse Tags</Link>
+            <Link to="/tags">Browse Tags</Link> &mdash; 142,119 unique tags linked to releases
           </li>
           <li>
-            <Link to="/wiki">Wiki</Link> &mdash; 274 preserved help articles
+            <Link to="/wiki">Wiki</Link> &mdash; 274 text-only preserved help articles
           </li>
           <li>
             <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive{' '}
