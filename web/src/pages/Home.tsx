@@ -36,7 +36,7 @@ export function Home() {
       <Box title="what.cd wiki">
         <p>
           The what.cd wiki is a read-only, semi-faithful recreation of what.cd's browsing experience, built from the
-          site's final database export. There is no login, no forum, and nothing here can be downloaded &mdash; but
+          site's final database export. There is no login, no forum, and <strong>nothing here can be downloaded</strong> &mdash; but
           you can browse the releases, artists, collages, and wiki as they looked before the site closed in late
           2016. I&rsquo;ve also added a few quality-of-life tweaks, (random button, Discogs integration, and a few
           new sort options), so that you can get the most out of this amazing repository of information.

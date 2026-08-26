@@ -5,5 +5,7 @@
 `GET /api/visitor-count`, see `api/src/routes/visitors.ts` and
 `web/src/components/Layout.tsx`).
 
-**Whenever you make a code change in this repo, increment `BUILD_NUMBER` by
-1 in the same change**, so the footer always reflects the latest build.
+**Increment `BUILD_NUMBER` by 1 once per commit, right before committing** --
+not per edit within a session. Several edits made before a commit should
+only bump it once, so the number tracks deploys/commits, not intermediate
+working-tree changes.

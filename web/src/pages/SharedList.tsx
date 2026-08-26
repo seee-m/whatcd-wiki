@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, type SharedList as SharedListData } from '../lib/api';
 import { Box } from '../components/Box';
-import { youtubeEmbedUrl } from '../lib/youtube';
+import { DiscogsVideoBox } from '../components/DiscogsVideoBox';
 
 const CSV_COLUMNS = ['Release', 'Artist', 'Label', 'Catalogue Number', 'Year', 'URL'];
 
@@ -71,6 +71,11 @@ export function SharedList() {
   if (notFound) return <p className="center">List not found &mdash; the link may be wrong or the list was never created.</p>;
   if (!list) return <p className="center">Loading&hellip;</p>;
 
+  // Video entries only carry a releaseId (see api/src/routes/lists.ts) --
+  // name/artists are already in `releases`, so look them up from there
+  // instead of duplicating them per video over the wire.
+  const releaseById = new Map(list.releases.map((r) => [r.id, r]));
+
   return (
     <>
       <h2>{list.title}</h2>
@@ -121,47 +126,23 @@ export function SharedList() {
               </tbody>
             </table>
           </Box>
-          {list.discogsVideos.length > 0 &&
-            (() => {
-              const current = list.discogsVideos[activeVideo];
-              const embedUrl = current && youtubeEmbedUrl(current.url, videoClicked);
-              return (
-                <Box
-                  title={
-                    <>
-                      Youtube <span className="box-title-note">(Matching links via Discogs, may be inaccurate or incomplete)</span>
-                    </>
-                  }
-                >
-                  {embedUrl && (
-                    <div className="video-embed">
-                      <iframe
-                        src={embedUrl}
-                        title={current.title}
-                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                        allowFullScreen
-                      />
-                    </div>
-                  )}
-                  <ul className="video-switcher">
-                    {list.discogsVideos.map((v, i) => (
-                      <li key={`${v.releaseId}-${v.url}`} className={i === activeVideo ? 'active' : undefined}>
-                        <a
-                          href="#"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            setActiveVideo(i);
-                            setVideoClicked(true);
-                          }}
-                        >
-                          {v.artistNames.length > 0 ? `${v.artistNames.join(', ')} – ${v.releaseName}` : v.releaseName}: {v.title}
-                        </a>
-                      </li>
-                    ))}
-                  </ul>
-                </Box>
-              );
-            })()}
+          {list.discogsVideos.length > 0 && (
+            <DiscogsVideoBox
+              videos={list.discogsVideos.map((v) => {
+                const release = releaseById.get(v.releaseId);
+                const artistNames = release?.artists.map((a) => a.name) ?? [];
+                const releaseName = release?.name ?? '';
+                const label = artistNames.length > 0 ? `${artistNames.join(', ')} – ${releaseName}: ${v.title}` : `${releaseName}: ${v.title}`;
+                return { key: `${v.releaseId}-${v.url}`, label, title: v.title, url: v.url };
+              })}
+              activeVideo={activeVideo}
+              videoClicked={videoClicked}
+              onSelect={(i) => {
+                setActiveVideo(i);
+                setVideoClicked(true);
+              }}
+            />
+          )}
           <p className="action-row list-actions">
             <button
               type="button"

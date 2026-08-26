@@ -2,8 +2,8 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, type ReleaseDetail, type TorrentEdition, type ReleaseExtras } from '../lib/api';
 import { Box } from '../components/Box';
+import { DiscogsVideoBox } from '../components/DiscogsVideoBox';
 import { parseFileList, formatBytes } from '../lib/fileList';
-import { youtubeEmbedUrl } from '../lib/youtube';
 import { addToDraft, removeFromDraft, isInDraft } from '../lib/listDraft';
 
 const noartworkModules = import.meta.glob('../assets/noartwork/*.png', { eager: true, import: 'default' }) as Record<
@@ -153,56 +153,18 @@ export function TorrentGroup() {
             }}
           />
         </Box>
-        {extras &&
-          extras.videos.length > 0 &&
-          (() => {
-            const current = extras.videos[activeVideo];
-            const embedUrl = current && youtubeEmbedUrl(current.url, videoClicked);
-            return (
-              <Box
-                title={
-                  <>
-                    Youtube <span className="box-title-note">(Matching links via Discogs, may be inaccurate or incomplete)</span>
-                    {extras.discogsUrl && (
-                      <>
-                        {' '}
-                        <a href={extras.discogsUrl} target="_blank" rel="noopener noreferrer">
-                          - View Release
-                        </a>
-                      </>
-                    )}
-                  </>
-                }
-              >
-                {embedUrl && (
-                  <div className="video-embed">
-                    <iframe
-                      src={embedUrl}
-                      title={current.title}
-                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                      allowFullScreen
-                    />
-                  </div>
-                )}
-                <ul className="video-switcher">
-                  {extras.videos.map((v, i) => (
-                    <li key={v.url} className={i === activeVideo ? 'active' : undefined}>
-                      <a
-                        href="#"
-                        onClick={(e) => {
-                          e.preventDefault();
-                          setActiveVideo(i);
-                          setVideoClicked(true);
-                        }}
-                      >
-                        {v.title}
-                      </a>
-                    </li>
-                  ))}
-                </ul>
-              </Box>
-            );
-          })()}
+        {extras && (extras.videos.length > 0 || extras.discogsUrl) && (
+          <DiscogsVideoBox
+            videos={extras.videos.map((v) => ({ key: v.url, label: v.title, title: v.title, url: v.url }))}
+            activeVideo={activeVideo}
+            videoClicked={videoClicked}
+            viewReleaseUrl={extras.discogsUrl}
+            onSelect={(i) => {
+              setActiveVideo(i);
+              setVideoClicked(true);
+            }}
+          />
+        )}
         <Box title="Artists">
           <ul className="nobullet">
             {release.artists.map((a) => (
@@ -267,14 +229,14 @@ export function TorrentGroup() {
             </div>
           )}
         </Box>
-        {(coverUrl || (extras && extras.videos.length > 0)) && (
+        {(coverUrl || (extras && (extras.videos.length > 0 || extras.discogsUrl))) && (
           <p className="external-disclaimer">
             {coverUrl && (
               <>
                 Cover art via {coverSource === 'musicbrainz' ? 'MusicBrainz' : coverSource === 'itunes' ? 'iTunes' : 'Discogs'}.{' '}
               </>
             )}
-            {extras && extras.videos.length > 0 && <>Videos/release link via Discogs. </>}
+            {extras && (extras.videos.length > 0 || extras.discogsUrl) && <>Videos/release link via Discogs. </>}
             Not part of the original archive, may be inaccurate.
           </p>
         )}

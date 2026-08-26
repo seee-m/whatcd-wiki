@@ -158,18 +158,17 @@ export default async function listsRoutes(app: FastifyInstance) {
       .all(...(releaseIds as SqlParam[])) as { release_id: number; discogs_url: string | null; videos: string | null }[];
     const extrasByRelease = new Map(extrasRows.map((r) => [r.release_id, r]));
 
+    // releaseName/artistNames/discogsUrl are deliberately omitted here --
+    // they're already present per-release in `releases` below, and a list
+    // near the 300-release cap can have ~1500 of these; the frontend joins
+    // against `releases` by releaseId instead of paying for that data twice.
     const discogsVideos = releaseIds
       .filter((rid) => releaseById.has(rid))
       .flatMap((rid) => {
         const extra = extrasByRelease.get(rid);
         if (!extra?.videos) return [];
-        const release = releaseById.get(rid)!;
-        const artistNames = (artistMap.get(rid) ?? []).map((a) => a.name);
         return (JSON.parse(extra.videos) as { url: string; title: string }[]).map((v) => ({
           releaseId: rid,
-          releaseName: release.name,
-          artistNames,
-          discogsUrl: extra.discogs_url,
           title: v.title,
           url: v.url,
         }));
@@ -190,8 +189,8 @@ export default async function listsRoutes(app: FastifyInstance) {
             id: r.id,
             name: r.name,
             year: r.year || null,
-            recordLabel: r.record_label,
-            catalogueNumber: r.catalogue_number,
+            recordLabel: r.record_label || null,
+            catalogueNumber: r.catalogue_number || null,
             artists: artistMap.get(r.id) ?? [],
           };
         }),

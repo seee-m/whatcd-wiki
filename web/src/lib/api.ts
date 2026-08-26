@@ -137,9 +137,6 @@ export interface WikiArticle {
 
 export interface DiscogsListVideo {
   releaseId: number;
-  releaseName: string;
-  artistNames: string[];
-  discogsUrl: string | null;
   title: string;
   url: string;
 }
