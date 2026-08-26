@@ -3,37 +3,54 @@
 // lookup (api/src/discogsRelease.ts). What.cd's catalog is permanently
 // frozen (site closed 2016), so there's no ongoing need to re-check
 // releases -- one bulk pass covers the vast majority up front, and the
-// existing live discovery/pre-warmer (api/src/routes/tv.ts) keeps running
-// afterward as a fallback for whatever this couldn't confidently match.
+// release page's live /extras fallback covers whatever this couldn't
+// confidently match.
 //
 // Usage:
 //   node api/import/import-discogs-videos.mjs /path/to/discogs_20260801_releases.xml.gz
 //   node api/import/import-discogs-videos.mjs "https://data.discogs.com/?download=data%2F2026%2Fdiscogs_20260801_releases.xml.gz"
+//   node api/import/import-discogs-videos.mjs <source> --rerun
 //
 // The second form fetches and decompresses each dump in-stream -- the
 // compressed download is never written to disk at all, only the small
 // per-entry fields that survive filtering ever get held anywhere.
 //
-// Three tiers, in order, each only attempted where the previous one found
-// nothing for a given whatcd release:
+// If this month's dump has already been imported, the run asks whether to
+// re-stream the releases dump anyway (needed after a change to the
+// matching rules below, which is the only reason the same dump would
+// produce a different answer than it did last time). --rerun answers yes
+// up front, and is the only way to say yes when stdin isn't a terminal --
+// which is exactly how the production wrapper runs this, detached under
+// nohup, where a prompt would hang forever instead of being answered.
+//
+// Two dumps, and a fixed ladder of matching rules applied against each:
 //   1. Releases dump (~10GB compressed) -- full index of every release
-//      (specific pressing) with a usable YouTube video, keyed by
-//      normalized "artist|title". Skipped entirely if release_extras
-//      already has rows tagged with this month's dump (source LIKE
-//      "bulk-YYYYMMDD%") -- no reason to re-stream 10GB for a tier that
-//      already ran this month.
-//   2. Same releases-dump index, but keyed by (label, catalogue number) --
-//      catches releases tier 1 misses purely on title-text differences.
-//   3. Masters dump (~600MB compressed, ~6% the size) -- one entry per
+//      (specific pressing) with a usable YouTube video. Skipped unless
+//      --rerun if release_extras already has rows tagged with this
+//      month's dump (source LIKE "bulk-YYYYMMDD%").
+//   2. Masters dump (~600MB compressed, ~6% the size) -- one entry per
 //      canonical work rather than per pressing, with its own videos list
 //      pooled across every pressing (a video entered against a 2024
 //      remaster reissue shows up here even if the specific pressing that
-//      matches a whatcd release never had a video of its own). Always
-//      runs, scoped to whichever whatcd releases are *still* unmatched
-//      after tiers 1+2 -- built as a targeted lookup against a small
-//      pre-computed set of wanted keys, not a full index, so memory stays
-//      bounded regardless of how much of the dump gets scanned (see
-//      buildMastersMatches).
+//      matches a whatcd release never had a video of its own). Runs over
+//      whatever the releases dump left unmatched -- built as a targeted
+//      lookup against a pre-computed set of wanted keys, not a full
+//      index, so memory stays bounded regardless of how much of the dump
+//      gets scanned (see buildMastersMatches).
+//
+// The matching rules themselves live in one place, MATCH_RULES, and are
+// shared by both dumps. They run in strict confidence order and the first
+// one to find a candidate wins, so a fuzzy rule can never take a release
+// that a more exact rule could have claimed. Each rule writes its own
+// release_extras.source tag, so any single rule can be audited -- or
+// undone with one DELETE -- without disturbing the others.
+//
+// Finally, releases matched exactly are *enriched* rather than left
+// alone: the releases dump hands us each release's master id outright, so
+// a pressing that carried only one video gets the rest of its master's
+// videos appended (see enrichExactMatchesFromMasters). That is not a
+// fuzzy match, it's the same record, and it matters because what.tv drops
+// a release from the pool the moment its only video 404s.
 
 import { DatabaseSync } from 'node:sqlite';
 import zlib from 'node:zlib';
@@ -42,21 +59,23 @@ import os from 'node:os';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { Readable } from 'node:stream';
+import readline from 'node:readline/promises';
 
 const DB_PATH =
   process.env.SQLITE_PATH || path.join(os.homedir(), 'Library/Application Support/whatcd-wiki/whatcd.sqlite');
 
-const releasesDumpSource = process.argv[2];
+const argv = process.argv.slice(2);
+const FORCE_RERUN = argv.includes('--rerun');
+const releasesDumpSource = argv.find((a) => !a.startsWith('--'));
 if (!releasesDumpSource) {
   console.error(
-    'Usage: node import-discogs-videos.mjs /path/to/discogs_YYYYMMDD_releases.xml.gz\n' +
-      '   or: node import-discogs-videos.mjs "https://data.discogs.com/?download=...releases.xml.gz"',
+    'Usage: node import-discogs-videos.mjs /path/to/discogs_YYYYMMDD_releases.xml.gz [--rerun]\n' +
+      '   or: node import-discogs-videos.mjs "https://data.discogs.com/?download=...releases.xml.gz" [--rerun]',
   );
   process.exit(1);
 }
 const dumpDate = (releasesDumpSource.match(/discogs_(\d{8})_releases/) ?? [])[1] ?? 'unknown';
 const SOURCE_TAG = `bulk-${dumpDate}`;
-const CATNO_SOURCE_TAG = `${SOURCE_TAG}-catno`;
 const MASTER_SOURCE_TAG = `${SOURCE_TAG}-master`;
 
 // Masters dumps live at the same path/date as the releases dump, just a
@@ -100,6 +119,18 @@ function copy(s) {
   return Buffer.from(s, 'utf8').toString('utf8');
 }
 
+// Abbreviations whatcd and Discogs disagree about constantly, expanded on
+// BOTH sides so the two spellings collapse onto one key. Symmetric by
+// construction: this can only ever merge keys that should have been the
+// same, never split ones that already matched.
+const ABBREVIATIONS = [
+  [/\bvol\b/g, 'volume'],
+  [/\bpt\b/g, 'part'],
+  [/\bfeat\b/g, 'featuring'],
+  [/\bft\b/g, 'featuring'],
+  [/\bvs\b/g, 'versus'],
+];
+
 // Discogs sometimes stores artist names in sort form ("Beatles, The") --
 // rewritten to match how what.cd stores the same names ("The Beatles")
 // before the rest of normalization (lowercase, strip accents/punctuation).
@@ -109,17 +140,34 @@ function copy(s) {
 // keeps its actual characters instead of being stripped down to an empty
 // string -- which silently made every such release unmatchable, and
 // worse, made them all collide on the same near-empty key.
-function normalize(name) {
+//
+// NFKC before NFD folds the compatibility forms Discogs picks up from
+// Japanese pressings -- full-width Latin, circled and squared characters,
+// ligatures -- onto their plain equivalents. NFD alone left "ＡＢＣ" and
+// "ABC" as different keys.
+//
+// isArtist drops a leading "The", which is worth 1,041 matches against
+// the masters dump on its own: "The Oscar Peterson Trio" and "Oscar
+// Peterson Trio" are the same act and both spellings are in live use on
+// both sides. Deliberately not applied to titles, where a leading "The"
+// genuinely distinguishes records.
+function normalize(name, isArtist = false) {
   if (!name) return '';
-  let s = decodeXmlEntities(name).normalize('NFD').replace(/[̀-ͯ]/g, '');
+  let s = decodeXmlEntities(name)
+    .normalize('NFKC')
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '');
   const sortForm = s.match(/^(.*),\s*(the|a|an)$/i);
   if (sortForm) s = `${sortForm[2]} ${sortForm[1]}`;
-  return s
+  s = s
     .toLowerCase()
     .replace(/&/g, ' and ') // "A & B" vs "A and B" -- otherwise & is just dropped below and the two never match
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
+  for (const [pattern, expansion] of ABBREVIATIONS) s = s.replace(pattern, expansion);
+  if (isArtist) s = s.replace(/^the\s+/, '');
+  return s.trim().replace(/\s+/g, ' ');
 }
 
 // Discogs disambiguates same-named artists with a trailing index -- e.g.
@@ -140,8 +188,48 @@ function canonicalizeVarious(normalizedArtist) {
 }
 
 function matchKey(artist, title) {
-  const normalizedArtist = canonicalizeVarious(normalize(stripArtistDisambiguation(artist)));
+  const normalizedArtist = canonicalizeVarious(normalize(stripArtistDisambiguation(artist), true));
   return `${normalizedArtist}|${normalize(title)}`;
+}
+
+// A key with an empty half matches everything that also normalized down to
+// nothing, which is exactly the collision the \p{L}/\p{N} fix above was
+// added to prevent -- so it's dropped rather than looked up.
+function isUsableKey(key) {
+  const bar = key.indexOf('|');
+  return bar > 0 && bar < key.length - 1;
+}
+
+const TRAILING_PARENTHETICAL = /\s*[\(\[][^\)\]]*[\)\]]\s*$/;
+
+// "Idealistic (A-Trak Remix)" -> "Idealistic". Returns '' when there was
+// nothing to strip, so callers can skip the rule entirely rather than
+// re-testing the key they already tried.
+function stripTrailingParenthetical(title) {
+  const stripped = title.replace(TRAILING_PARENTHETICAL, '').trim();
+  return stripped && stripped !== title ? stripped : '';
+}
+
+// Discogs writes bilingual titles as "Latin Title = Native Title" (and
+// occasionally chains three) -- extremely common on Japanese, Russian and
+// Chinese pressings, where whatcd will only ever have had one of the two
+// spellings typed into it. Indexing both halves is worth 2,411 matches to
+// the *unchanged* exact rule against the masters dump alone.
+function splitBilingualTitle(title) {
+  return title.split(/\s+=\s+/).map((s) => s.trim()).filter(Boolean);
+}
+
+// whatcd sometimes keeps a whole credit in one artist row ("Bob Marley &
+// The Wailers") where Discogs files the record under the lead artist
+// alone. Split on "&" only, never on the word "and" -- "Belle and
+// Sebastian" and "Godspeed You! Black Emperor" are single acts, and
+// splitting them would invent keys for artists that don't exist.
+function splitAmpersandArtist(name) {
+  if (!name.includes('&')) return [];
+  return name
+    .split('&')
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 3);
 }
 
 // Catalogue numbers are precise identifiers, not free text -- "SK 032",
@@ -153,15 +241,214 @@ function normalizeCatno(catno) {
   return catno.toUpperCase().replace(/[^A-Z0-9]/g, '');
 }
 
-// A second, independent match key alongside matchKey's artist|title --
-// (label, catalogue number) is how physical releases are actually
-// identified in the wild, so it catches releases matchKey misses purely
-// because of title-text differences (translated titles, edition
-// suffixes, punctuation) without loosening matchKey's own precision at
-// all. Masters have no catalogue-number data, so this tier only ever
-// applies against the releases dump.
-function catalogKey(label, catno) {
-  return `${normalize(label)}|${normalizeCatno(catno)}`;
+// Only catalogue numbers distinctive enough to mean something on their own
+// get indexed. "1", "001", "CD", "LP" sit on thousands of unrelated
+// records across every label that ever pressed vinyl, and indexing them
+// would leave the label check below as the only thing standing between us
+// and a wrong match.
+function isDistinctiveCatno(normalized) {
+  if (normalized.length < 5) return false;
+  if (/[A-Z]/.test(normalized) && /[0-9]/.test(normalized)) return true;
+  return normalized.length >= 7;
+}
+
+// whatcd and Discogs almost never write a label name identically:
+// "Beggars Banquet" vs "Beggars Banquet Records", "Ki/oon" vs "Ki/oon
+// Music", "Bruton Music" vs "Bruton Music Library", "Sinedin" vs "Sinedín
+// Music". The old (label, catno) composite key demanded exact equality
+// and threw the whole tier away for all of those -- of a sample of
+// unmatched releases carrying both fields, checked against Discogs by
+// catalogue number, the label text differed on more than half.
+//
+// Requiring one name to *contain* the other keeps the check meaningful
+// while tolerating the suffix noise. A catalogue number is never accepted
+// with no label agreement at all -- that check is what makes this tier
+// safe, and dropping it is what would make catno matching dangerous.
+function labelRelation(whatcdLabel, discogsLabel) {
+  const a = normalize(whatcdLabel);
+  const b = normalize(discogsLabel);
+  if (!a || !b) return null;
+  if (a === b) return 'exact';
+  if (a.includes(b) || b.includes(a)) return 'loose';
+  return null;
+}
+
+// Compilation series whose name is reused by dozens of unrelated records.
+// "various|dj kicks" alone covers 46 different whatcd releases, so a hit
+// on it says nothing about which one we're actually looking at. Titles
+// this generic are the only real false-positive risk in the "various"
+// rule -- 98,299 of the 100,829 compilation-shaped releases have a title
+// no other release shares.
+const GENERIC_COMPILATION_TITLES = new Set([
+  'dj kicks',
+  'greatest hits',
+  'best of',
+  'the best of',
+  'remixes',
+  'untitled',
+  'unknown',
+  'late night tales',
+  'back to mine',
+  'love songs',
+  'various artists',
+  'compilation',
+  'sampler',
+  'singles',
+  'collection',
+  'hits',
+  'demo',
+  'live',
+  'promo',
+  'mixtape',
+  'ep',
+]);
+
+// whatcd credits every contributing artist on a compilation with
+// importance = 1; Discogs files the same record under "Various". Matching
+// picks whatcd's alphabetically-first contributor, so "Bedrock|trainspotting"
+// gets looked up when the dump holds "various|trainspotting" -- which is
+// why compilations were the single largest unmatched population (100,829
+// releases, against only 19,934 compilation-shaped releases matched).
+function isCompilationShaped(row) {
+  return row.main_artist_count >= 4 || row.release_type === 7;
+}
+
+// Only ever applied to the fuzzy rules. Measured against the 20260801
+// masters dump: even an exact artist|title match disagrees with the
+// master's year by more than four years 6.6% of the time -- reissues,
+// anthologies and compilations of older material are legitimately far
+// apart -- so a tight guard would reject real matches at a meaningful
+// rate. A 15-year window leaves those alone while still throwing out the
+// obvious nonsense (a 2013 release matching a 1985 master of the same
+// title, which is what an over-generic title looks like when it goes
+// wrong).
+const FUZZY_MAX_YEAR_GAP = 15;
+
+function yearPlausible(releaseYear, candidates) {
+  if (!releaseYear) return true;
+  const known = candidates.map((c) => c.year).filter((y) => y);
+  if (known.length === 0) return true;
+  return known.some((y) => Math.abs(y - releaseYear) <= FUZZY_MAX_YEAR_GAP);
+}
+
+// Every way we know of to turn one whatcd release into a key the Discogs
+// index might hold, in strict confidence order. The first rule to find a
+// candidate wins and its tag is what gets written, so a fuzzy rule can
+// never claim a release a more exact rule could have matched.
+//
+// The percentage on each rule is its year-agreement rate, measured over
+// its matches against the 20260801 masters dump: the share whose whatcd
+// year lands within four years of the master's own year. Exact
+// artist|title scores 93.4%, so that -- not 100% -- is the bar to read
+// these against.
+//
+// `index`  which of the two indexes buildReleasesIndex returns to probe.
+// `fuzzy`  subject to the year guard above, and tagged so it can be undone.
+// `filter` optional extra proof required of a candidate before accepting it.
+const MATCH_RULES = [
+  {
+    // 93.4% -- the original tier 1, unchanged in intent.
+    rule: 'exact',
+    suffix: '',
+    index: 'title',
+    fuzzy: false,
+    keys: (r) => [matchKey(r.artist_name, r.release_name)],
+  },
+  {
+    // 92.6-96.5% -- at or above the exact rule's own precision. whatcd
+    // stores the canonical artist in artists.name and the name actually
+    // credited on the release in artist_aliases; Discogs stores the exact
+    // same split as <name> and <anv>. Only the canonical halves were ever
+    // being compared, so Smog/Bill Callahan, Dinosaur L/Arthur Russell and
+    // KoЯn/Korn all silently failed to match.
+    rule: 'alias',
+    suffix: '-alias',
+    index: 'title',
+    fuzzy: false,
+    keys: (r) => r.aliases.map((a) => matchKey(a, r.release_name)),
+  },
+  {
+    // 87.1% -- small (a few hundred), but the failures are cheap to reason
+    // about: the title still has to match exactly.
+    rule: 'ampsplit',
+    suffix: '-ampsplit',
+    index: 'title',
+    fuzzy: false,
+    keys: (r) => splitAmpersandArtist(r.artist_name).map((a) => matchKey(a, r.release_name)),
+  },
+  {
+    // Catalogue number plus a label-name agreement. Placed above the fuzzy
+    // title rules because a catalogue number identifies a physical record
+    // rather than resembling one.
+    rule: 'catno',
+    suffix: '-catno',
+    index: 'catno',
+    fuzzy: false,
+    keys: (r) => {
+      if (!r.record_label || !r.catalogue_number) return [];
+      const normalized = normalizeCatno(r.catalogue_number);
+      return isDistinctiveCatno(normalized) ? [normalized] : [];
+    },
+    filter: (candidates, r) => candidates.filter((c) => labelRelation(r.record_label, c.label) !== null),
+  },
+  {
+    // 85.6% -- the largest single win available, and the reason
+    // compilations were so badly covered. Gated on a distinctive title.
+    rule: 'various',
+    suffix: '-various',
+    index: 'title',
+    fuzzy: true,
+    keys: (r) => {
+      if (!isCompilationShaped(r)) return [];
+      const title = normalize(r.release_name);
+      if (!title || GENERIC_COMPILATION_TITLES.has(title)) return [];
+      return [`various|${title}`];
+    },
+  },
+  {
+    // 82.6% -- the loosest rule here, and tagged accordingly. Matches
+    // "Idealistic (A-Trak Remix)" to the master for "Idealistic": a
+    // different record, but the same artist and the same work, which is
+    // the same trade the masters dump already makes by pooling videos
+    // across pressings.
+    rule: 'paren',
+    suffix: '-paren',
+    index: 'title',
+    fuzzy: true,
+    keys: (r) => {
+      const stripped = stripTrailingParenthetical(r.release_name);
+      return stripped ? [matchKey(r.artist_name, stripped)] : [];
+    },
+  },
+];
+
+const RULE_RANK = new Map(MATCH_RULES.map((r, i) => [r.rule, i]));
+
+function tagFor(rule, base) {
+  return `${base}${MATCH_RULES.find((r) => r.rule === rule).suffix}`;
+}
+
+// Resolves one whatcd release against a pair of indexes by walking
+// MATCH_RULES in order. Returns the winning rule plus the candidate list
+// it found, or null. Shared by both dumps so the ladder can't drift apart
+// between them.
+function resolveMatch(row, indexes) {
+  for (const rule of MATCH_RULES) {
+    const index = indexes[rule.index];
+    if (!index) continue;
+    for (const key of rule.keys(row)) {
+      if (!key || (rule.index === 'title' && !isUsableKey(key))) continue;
+      let candidates = index.get(key);
+      if (!candidates || candidates.length === 0) continue;
+      if (rule.filter) {
+        candidates = rule.filter(candidates, row);
+        if (candidates.length === 0) continue;
+      }
+      if (rule.fuzzy && !yearPlausible(row.release_year, candidates)) continue;
+      return { rule: rule.rule, candidates };
+    }
+  }
+  return null;
 }
 
 // Streams the gunzipped dump and yields each top-level `<tag ...>...</tag>`
@@ -235,6 +522,67 @@ function parseVideos(videosInner) {
   return videos;
 }
 
+const MAX_VIDEOS = 5;
+
+function youtubeId(url) {
+  return url.match(YOUTUBE_ID_RE)?.[1] ?? url;
+}
+
+// Appends videos without ever displacing what's already there, deduped by
+// YouTube id rather than by URL (the same video appears as youtu.be/... and
+// watch?v=... across different Discogs submissions).
+function mergeVideos(existing, extra) {
+  const seen = new Set(existing.map((v) => youtubeId(v.url)));
+  const merged = existing.slice();
+  for (const video of extra) {
+    if (merged.length >= MAX_VIDEOS) break;
+    const id = youtubeId(video.url);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    merged.push(video);
+  }
+  return merged;
+}
+
+// Discogs stores two names per credited artist: <name> is the canonical
+// artist and <anv> ("artist name variation") is how they were credited on
+// this particular record -- the exact mirror of whatcd's artist_aliases.
+// Indexing both is worth 4,157 matches against the masters dump.
+//
+// A multi-artist release additionally gets its joined form indexed,
+// because whatcd sometimes keeps the entire credit in a single artist row
+// ("Christy Azuma & Uppers International") where Discogs splits it in two.
+function extractArtistVariants(artistsInner) {
+  const names = [];
+  const variants = new Set();
+  for (const m of artistsInner.matchAll(/<artist>([\s\S]*?)<\/artist>/g)) {
+    const name = m[1].match(/<name>([^<]*)<\/name>/)?.[1];
+    const anv = m[1].match(/<anv>([^<]*)<\/anv>/)?.[1];
+    if (name) {
+      const c = copy(decodeXmlEntities(name));
+      names.push(c);
+      variants.add(c);
+    }
+    if (anv) variants.add(copy(decodeXmlEntities(anv)));
+  }
+  if (names.length > 1) variants.add(names.join(' & '));
+  return { names, variants: [...variants] };
+}
+
+// Every spelling of a dump entry's title worth indexing: the title itself,
+// each half of a bilingual "A = B" title, and each of those with a
+// trailing parenthetical stripped (the edition suffix sits on the Discogs
+// side about as often as it sits on whatcd's).
+function extractTitleVariants(title) {
+  const variants = new Set([title]);
+  for (const half of splitBilingualTitle(title)) variants.add(half);
+  for (const v of [...variants]) {
+    const stripped = stripTrailingParenthetical(v);
+    if (stripped) variants.add(stripped);
+  }
+  return [...variants];
+}
+
 function extractRelease(block) {
   const idMatch = block.match(/<release id="(\d+)"/);
   if (!idMatch) return null;
@@ -254,15 +602,14 @@ function extractRelease(block) {
   if (!title) return null;
 
   const artistsMatch = block.match(/<artists>([\s\S]*?)<\/artists>/);
-  const artistNames = artistsMatch
-    ? [...artistsMatch[1].matchAll(/<name>([^<]*)<\/name>/g)].map((m) => copy(m[1]))
-    : [];
-  if (artistNames.length === 0) return null;
+  if (!artistsMatch) return null;
+  const { names, variants } = extractArtistVariants(artistsMatch[1]);
+  if (names.length === 0) return null;
 
   // <labels><label name="Svek" catno="SK032" id="5"/></labels> -- a
   // release can carry more than one (co-releases, or a different catno
-  // per format), so every (name, catno) pair gets its own catalogKey
-  // entry in the index (see buildReleasesIndex).
+  // per format), so every (name, catno) pair gets its own entry in the
+  // catalogue-number index (see buildReleasesIndex).
   const labelsMatch = block.match(/<labels>([\s\S]*?)<\/labels>/);
   const labels = labelsMatch
     ? [...labelsMatch[1].matchAll(/<label\s+([^>]*)\/>/g)]
@@ -276,13 +623,18 @@ function extractRelease(block) {
     : [];
 
   const year = Number(block.match(/<released>(\d{4})/)?.[1]) || null;
+  // The releases dump names each release's canonical work outright, which
+  // is what makes enrichExactMatchesFromMasters an exact operation rather
+  // than a second guess at matching.
+  const masterId = Number(block.match(/<master_id[^>]*>(\d+)<\/master_id>/)?.[1]) || null;
 
   return {
     discogsId: Number(idMatch[1]),
-    title: copy(decodeXmlEntities(title)),
-    artistNames,
+    titleVariants: extractTitleVariants(copy(decodeXmlEntities(title))),
+    artistVariants: variants,
     labels,
     year,
+    masterId,
     videos,
   };
 }
@@ -304,14 +656,19 @@ function extractMaster(block) {
   if (!title) return null;
 
   const artistsMatch = block.match(/<artists>([\s\S]*?)<\/artists>/);
-  const artistNames = artistsMatch
-    ? [...artistsMatch[1].matchAll(/<name>([^<]*)<\/name>/g)].map((m) => copy(m[1]))
-    : [];
-  if (artistNames.length === 0) return null;
+  if (!artistsMatch) return null;
+  const { names, variants } = extractArtistVariants(artistsMatch[1]);
+  if (names.length === 0) return null;
 
   const year = Number(block.match(/<year>(\d{4})/)?.[1]) || null;
 
-  return { masterId: Number(idMatch[1]), title: copy(decodeXmlEntities(title)), artistNames, year, videos };
+  return {
+    masterId: Number(idMatch[1]),
+    titleVariants: extractTitleVariants(copy(decodeXmlEntities(title))),
+    artistVariants: variants,
+    year,
+    videos,
+  };
 }
 
 // A dropped connection partway through a large streamed fetch is a real,
@@ -324,141 +681,149 @@ function extractMaster(block) {
 // immediately.
 const MAX_FETCH_RETRIES = 5;
 
-async function buildReleasesIndex(source) {
-  const index = new Map(); // matchKey (artist|title) -> [{ discogsId, year, videos }]
-  const catnoIndex = new Map(); // catalogKey (label|catno) -> [{ discogsId, year, videos }]
-  let scanned = 0;
-  let withVideos = 0;
-  const startedAt = Date.now();
+function logProgress(what, scanned, withVideos, extra, startedAt) {
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
+  const mem = process.memoryUsage();
+  const rss = (mem.rss / 1024 / 1024).toFixed(0);
+  const heap = (mem.heapUsed / 1024 / 1024).toFixed(0);
+  console.log(
+    `  scanned ${scanned.toLocaleString()} ${what} (${withVideos.toLocaleString()} with usable video)${extra} -- ${elapsed}s -- rss ${rss}MB heap ${heap}MB`,
+  );
+}
+
+// Wraps a streaming pass in the retry/partial-progress policy described at
+// MAX_FETCH_RETRIES. `onBlock` is called for every block; whatever it
+// accumulated survives a give-up.
+async function streamWithRetry(source, tag, label, onBlock) {
   const isUrl = /^https?:\/\//i.test(source);
   let attempt = 0;
-
   while (true) {
     try {
-      for await (const block of xmlBlocks(source, 'release')) {
-        scanned++;
-        if (scanned % 200_000 === 0) {
-          const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
-          const mem = process.memoryUsage();
-          const rss = (mem.rss / 1024 / 1024).toFixed(0);
-          const heap = (mem.heapUsed / 1024 / 1024).toFixed(0);
-          console.log(
-            `  scanned ${scanned.toLocaleString()} releases (${withVideos.toLocaleString()} with usable video) -- ${elapsed}s -- rss ${rss}MB heap ${heap}MB`,
-          );
-        }
-
-        const extracted = extractRelease(block);
-        if (!extracted) continue;
-        withVideos++;
-
-        const entry = { discogsId: extracted.discogsId, year: extracted.year, videos: extracted.videos };
-        for (const artistName of extracted.artistNames) {
-          const key = matchKey(artistName, extracted.title);
-          const bucket = index.get(key);
-          if (bucket) bucket.push(entry);
-          else index.set(key, [entry]);
-        }
-        for (const label of extracted.labels) {
-          const key = catalogKey(label.name, label.catno);
-          const bucket = catnoIndex.get(key);
-          if (bucket) bucket.push(entry);
-          else catnoIndex.set(key, [entry]);
-        }
-      }
-      break; // the stream ended cleanly -- done
+      for await (const block of xmlBlocks(source, tag)) onBlock(block);
+      return;
     } catch (err) {
       attempt++;
-      console.warn(
-        `Warning: releases dump stream ended early after ${scanned.toLocaleString()} releases scanned (${err?.message ?? err}).`,
-      );
+      console.warn(`Warning: ${label} stream ended early (${err?.message ?? err}).`);
       if (!isUrl) {
         console.warn('Local file source -- not retrying (would hit the same cutoff). Using everything scanned so far.');
-        break;
+        return;
       }
       if (attempt > MAX_FETCH_RETRIES) {
         console.warn(`Giving up after ${MAX_FETCH_RETRIES} retries. Using everything scanned so far.`);
-        break;
+        return;
       }
       console.warn(`Restarting the fetch from the beginning (attempt ${attempt}/${MAX_FETCH_RETRIES})...`);
       await new Promise((resolve) => setTimeout(resolve, 3000));
     }
   }
+}
+
+async function buildReleasesIndex(source) {
+  const title = new Map(); // artist|title -> [{ discogsId, year, videos, masterId }]
+  const catno = new Map(); // normalized catno -> [{ discogsId, year, videos, masterId, label }]
+  let scanned = 0;
+  let withVideos = 0;
+  const startedAt = Date.now();
+
+  await streamWithRetry(source, 'release', 'releases dump', (block) => {
+    scanned++;
+    if (scanned % 200_000 === 0) logProgress('releases', scanned, withVideos, '', startedAt);
+
+    const extracted = extractRelease(block);
+    if (!extracted) return;
+    withVideos++;
+
+    const entry = {
+      discogsId: extracted.discogsId,
+      year: extracted.year,
+      videos: extracted.videos,
+      masterId: extracted.masterId,
+    };
+    for (const artist of extracted.artistVariants) {
+      for (const t of extracted.titleVariants) {
+        const key = matchKey(artist, t);
+        if (!isUsableKey(key)) continue;
+        const bucket = title.get(key);
+        if (bucket) bucket.push(entry);
+        else title.set(key, [entry]);
+      }
+    }
+    // Keyed on the catalogue number alone, with the label carried on the
+    // entry so labelRelation() can do the agreement check at lookup time.
+    // The old composite (label, catno) key could only ever match when both
+    // sides spelled the label identically, which they mostly don't.
+    for (const label of extracted.labels) {
+      const key = normalizeCatno(label.catno);
+      if (!isDistinctiveCatno(key)) continue;
+      const withLabel = { ...entry, label: label.name };
+      const bucket = catno.get(key);
+      if (bucket) bucket.push(withLabel);
+      else catno.set(key, [withLabel]);
+    }
+  });
 
   console.log(
     `Releases index built: ${scanned.toLocaleString()} releases scanned, ${withVideos.toLocaleString()} had a usable YouTube video, ` +
-      `${index.size.toLocaleString()} distinct artist|title keys, ${catnoIndex.size.toLocaleString()} distinct label|catno keys.`,
+      `${title.size.toLocaleString()} distinct artist|title keys, ${catno.size.toLocaleString()} distinct catalogue numbers.`,
   );
-  return { index, catnoIndex };
+  return { title, catno };
 }
 
 // Unlike buildReleasesIndex, this never retains an index of the whole
-// dump -- `wantedKeys` is the small, known-in-advance set of matchKeys
-// for whatcd releases that are *still* unmatched, computed from the local
-// DB before this ever streams a byte. Every master block gets parsed
+// dump -- `wantedKeys` is the small, known-in-advance set of keys for
+// whatcd releases that are *still* unmatched, computed from the local DB
+// before this ever streams a byte. Every master block gets parsed
 // (unavoidable -- the file has to be read once regardless), but a block
-// whose own matchKey isn't in `wantedKeys` is discarded immediately and
-// never retained anywhere. Peak memory is bounded by the wanted-key set
-// plus however many actual hits are found, not by the size of Discogs'
-// entire master catalog -- so this stays cheap even though it streams a
-// full ~600MB dump.
-async function buildMastersMatches(source, wantedKeys) {
-  const matched = new Map(); // matchKey -> [{ masterId, year, videos }] (only for keys present in wantedKeys)
+// whose keys aren't wanted is discarded immediately and never retained
+// anywhere. Peak memory is bounded by the wanted-key set plus however
+// many actual hits are found, not by the size of Discogs' entire master
+// catalog.
+//
+// `wantedMasterIds` rides along on the same pass: those are the masters of
+// releases already matched *exactly*, whose videos are wanted for
+// enrichment rather than for matching. Collecting them here costs one set
+// lookup per block and saves a second full stream of the dump.
+async function buildMastersMatches(source, wantedKeys, wantedMasterIds) {
+  const matched = new Map(); // key -> [{ masterId, year, videos }]
+  const forEnrichment = new Map(); // masterId -> videos
   let scanned = 0;
   let withVideos = 0;
   const startedAt = Date.now();
-  const isUrl = /^https?:\/\//i.test(source);
-  let attempt = 0;
 
-  while (true) {
-    try {
-      for await (const block of xmlBlocks(source, 'master')) {
-        scanned++;
-        if (scanned % 100_000 === 0) {
-          const elapsed = ((Date.now() - startedAt) / 1000).toFixed(0);
-          const mem = process.memoryUsage();
-          const rss = (mem.rss / 1024 / 1024).toFixed(0);
-          console.log(
-            `  scanned ${scanned.toLocaleString()} masters (${withVideos.toLocaleString()} with usable video, ${matched.size.toLocaleString()} matched keys so far) -- ${elapsed}s -- rss ${rss}MB`,
-          );
-        }
-
-        const extracted = extractMaster(block);
-        if (!extracted) continue;
-        withVideos++;
-
-        for (const artistName of extracted.artistNames) {
-          const key = matchKey(artistName, extracted.title);
-          if (!wantedKeys.has(key)) continue;
-          const entry = { masterId: extracted.masterId, year: extracted.year, videos: extracted.videos };
-          const bucket = matched.get(key);
-          if (bucket) bucket.push(entry);
-          else matched.set(key, [entry]);
-        }
-      }
-      break;
-    } catch (err) {
-      attempt++;
-      console.warn(
-        `Warning: masters dump stream ended early after ${scanned.toLocaleString()} masters scanned (${err?.message ?? err}).`,
-      );
-      if (!isUrl) {
-        console.warn('Local file source -- not retrying (would hit the same cutoff). Using everything scanned so far.');
-        break;
-      }
-      if (attempt > MAX_FETCH_RETRIES) {
-        console.warn(`Giving up after ${MAX_FETCH_RETRIES} retries. Using everything scanned so far.`);
-        break;
-      }
-      console.warn(`Restarting the fetch from the beginning (attempt ${attempt}/${MAX_FETCH_RETRIES})...`);
-      await new Promise((resolve) => setTimeout(resolve, 3000));
+  await streamWithRetry(source, 'master', 'masters dump', (block) => {
+    scanned++;
+    if (scanned % 100_000 === 0) {
+      logProgress('masters', scanned, withVideos, `, ${matched.size.toLocaleString()} matched keys so far`, startedAt);
     }
-  }
+
+    const extracted = extractMaster(block);
+    if (!extracted) return;
+    withVideos++;
+
+    if (wantedMasterIds.has(extracted.masterId)) {
+      forEnrichment.set(extracted.masterId, extracted.videos);
+    }
+
+    const entry = { masterId: extracted.masterId, year: extracted.year, videos: extracted.videos };
+    const seen = new Set();
+    for (const artist of extracted.artistVariants) {
+      for (const t of extracted.titleVariants) {
+        const key = matchKey(artist, t);
+        if (!wantedKeys.has(key) || seen.has(key)) continue;
+        seen.add(key);
+        const bucket = matched.get(key);
+        if (bucket) bucket.push(entry);
+        else matched.set(key, [entry]);
+      }
+    }
+  });
 
   console.log(
     `Masters scan done: ${scanned.toLocaleString()} masters scanned, ${withVideos.toLocaleString()} had a usable YouTube video, ` +
-      `${matched.size.toLocaleString()} of ${wantedKeys.size.toLocaleString()} wanted keys matched.`,
+      `${matched.size.toLocaleString()} of ${wantedKeys.size.toLocaleString()} wanted keys matched, ` +
+      `${forEnrichment.size.toLocaleString()} of ${wantedMasterIds.size.toLocaleString()} enrichment masters found.`,
   );
-  return matched;
+  return { matched, forEnrichment };
 }
 
 function pickBestCandidate(candidates, year) {
@@ -476,92 +841,156 @@ function pickBestCandidate(candidates, year) {
   return best;
 }
 
-function ensureSourceColumn(db) {
+function ensureColumns(db) {
   const cols = db.prepare('PRAGMA table_info(release_extras)').all();
-  if (!cols.some((c) => c.name === 'source')) {
-    db.exec('ALTER TABLE release_extras ADD COLUMN source TEXT');
-  }
+  const have = new Set(cols.map((c) => c.name));
+  if (!have.has('source')) db.exec('ALTER TABLE release_extras ADD COLUMN source TEXT');
+  // Recorded by the releases tier so the masters tier can pool a release's
+  // own master videos onto it without having to match anything again.
+  if (!have.has('discogs_master_id')) db.exec('ALTER TABLE release_extras ADD COLUMN discogs_master_id INTEGER');
 }
 
-// Tiers 1+2: full releases-dump index, exact title/artist then
-// label/catno fallback. Unchanged in behavior from before this file grew
-// a masters tier -- its own transaction, committed independently of
-// whatever the masters tier does afterward.
-async function runReleasesTiers(db) {
-  console.log(`Reading releases dump: ${releasesDumpSource}`);
-  const { index, catnoIndex } = await buildReleasesIndex(releasesDumpSource);
+// Loads every alias whatcd knows for an artist, not just the one credited
+// on a given release. Aliases identical to the canonical name are skipped
+// (that's the overwhelming majority of the ~1M rows -- most artists have
+// exactly one "alias", their own name), and the per-artist list is capped
+// so a handful of artists with 100+ aliases can't blow the key count up.
+const MAX_ALIASES_PER_ARTIST = 12;
 
-  // Same "one main artist, alphabetically first if several" rule the live
-  // lookup uses (api/src/routes/torrents.ts) -- keeps bulk- and live-
-  // matched releases consistent with each other. Rows are pre-sorted by
-  // (release_id, artist name), so the first row seen per release_id is
-  // already the right one. Streamed via .iterate() rather than .all() --
-  // by this point the in-memory Discogs index (millions of entries) is
-  // already resident, and materializing this whole join as a second
-  // multi-million-row array on top of it is what pushed the process OOM
-  // in production. Building the Map directly off the iterator means only
-  // one copy of this data is ever alive at once.
-  const mainArtistByRelease = new Map();
+function loadAliases(db) {
+  const byArtist = new Map();
+  for (const row of db
+    .prepare(
+      `SELECT al.artist_id, al.name
+       FROM artist_aliases al
+       JOIN artists a ON a.id = al.artist_id
+       WHERE al.name <> a.name`,
+    )
+    .iterate()) {
+    const bucket = byArtist.get(row.artist_id);
+    if (bucket) {
+      if (bucket.length < MAX_ALIASES_PER_ARTIST) bucket.push(row.name);
+    } else {
+      byArtist.set(row.artist_id, [row.name]);
+    }
+  }
+  console.log(`${byArtist.size.toLocaleString()} artists have an alias distinct from their canonical name.`);
+  return byArtist;
+}
+
+// The one place a release_extras row gets written, so the confidence
+// ordering is structural rather than a property of where the call sites
+// happen to sit. A release already claimed by a better-ranked rule in this
+// run is left alone; rows from an earlier dump are always replaced, since
+// that's the whole point of re-running against a newer dump.
+function makeWriter(db) {
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at, source, discogs_master_id)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  );
+  const now = new Date().toISOString();
+  const rankByRelease = new Map();
+  // `base` is which dump the match came from -- SOURCE_TAG for the releases
+  // dump, MASTER_SOURCE_TAG for the masters dump -- so the tag records both
+  // halves of the provenance: which dump, and which rule fired. A masters
+  // exact match therefore still reads "bulk-YYYYMMDD-master", exactly as it
+  // did before the rule ladder existed.
+  return function write(releaseId, rule, base, discogsUrl, videos, masterId) {
+    const rank = RULE_RANK.get(rule);
+    const existing = rankByRelease.get(releaseId);
+    if (existing !== undefined && existing <= rank) return false;
+    rankByRelease.set(releaseId, rank);
+    insert.run(releaseId, discogsUrl, JSON.stringify(videos), now, tagFor(rule, base), masterId ?? null);
+    return true;
+  };
+}
+
+// Streams the whatcd side of the match: one row per release, carrying the
+// main artist plus everything MATCH_RULES needs to decide. Rows arrive
+// pre-sorted by (release_id, artist name), so the first artist seen per
+// release is the "one main artist, alphabetically first if several" the
+// live lookup uses too (api/src/routes/torrents.ts) -- and because they're
+// contiguous, the remaining rows for the same release can be counted on
+// the way past to give isCompilationShaped() its artist count for free.
+//
+// Streamed via .iterate() rather than .all(): by the time this runs the
+// in-memory Discogs index (millions of entries) is already resident, and
+// materializing this whole join as a second multi-million-row array on top
+// of it is what pushed the process OOM in production.
+function loadWhatcdReleases(db, aliasesByArtist, { onlyUnmatched }) {
+  const releases = new Map();
+  const filter = onlyUnmatched
+    ? // Includes rows that exist but hold no video: a release the live
+      // /extras lookup once probed and came back empty on used to be
+      // excluded from the masters tier forever, because the tier tested
+      // only for the row's existence. That silently stranded 8,432
+      // releases.
+      `LEFT JOIN release_extras re ON re.release_id = r.id
+       WHERE r.category_id = 1 AND (re.release_id IS NULL OR re.videos IS NULL OR re.videos = '[]')`
+    : `WHERE r.category_id = 1`;
   for (const row of db
     .prepare(
       `SELECT r.id AS release_id, r.name AS release_name, r.year AS release_year,
+              r.release_type AS release_type,
               r.record_label AS record_label, r.catalogue_number AS catalogue_number,
-              a.name AS artist_name
+              ra.artist_id AS artist_id, a.name AS artist_name
        FROM releases r
        JOIN release_artists ra ON ra.release_id = r.id AND ra.importance = 1
        JOIN artists a ON a.id = ra.artist_id
-       WHERE r.category_id = 1
+       ${filter}
        ORDER BY r.id, a.name COLLATE NOCASE ASC`,
     )
     .iterate()) {
-    if (!mainArtistByRelease.has(row.release_id)) {
-      mainArtistByRelease.set(row.release_id, row);
+    const existing = releases.get(row.release_id);
+    if (existing) {
+      existing.main_artist_count++;
+      continue;
+    }
+    row.main_artist_count = 1;
+    row.aliases = aliasesByArtist.get(row.artist_id) ?? [];
+    releases.set(row.release_id, row);
+  }
+  return releases;
+}
+
+function summarize(label, counts, base) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  console.log(`${label}: ${total.toLocaleString()} releases`);
+  for (const rule of MATCH_RULES) {
+    const n = counts[rule.rule] ?? 0;
+    if (n > 0) {
+      console.log(`  ${padLeft(n.toLocaleString(), 9)}  ${padRight(rule.rule, 9)} source="${tagFor(rule.rule, base)}"`);
     }
   }
-  console.log(`${mainArtistByRelease.size.toLocaleString()} music releases have a main artist to match against.`);
+  return total;
+}
 
-  const insert = db.prepare(
-    'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at, source) VALUES (?, ?, ?, ?, ?)',
-  );
-  const now = new Date().toISOString();
+// The releases dump: every rule in MATCH_RULES, against the full index.
+async function runReleasesTiers(db, write, aliasesByArtist) {
+  console.log(`Reading releases dump: ${releasesDumpSource}`);
+  const indexes = await buildReleasesIndex(releasesDumpSource);
 
-  let matchedByTitle = 0;
-  let matchedByCatno = 0;
+  const releases = loadWhatcdReleases(db, aliasesByArtist, { onlyUnmatched: false });
+  console.log(`${releases.size.toLocaleString()} music releases have a main artist to match against.`);
+
+  const counts = {};
   db.exec('BEGIN');
   try {
-    for (const row of mainArtistByRelease.values()) {
-      const titleKeyMatch = index.get(matchKey(row.artist_name, row.release_name));
-      if (titleKeyMatch && titleKeyMatch.length > 0) {
-        const best = pickBestCandidate(titleKeyMatch, row.release_year);
-        insert.run(
+    for (const row of releases.values()) {
+      const match = resolveMatch(row, indexes);
+      if (!match) continue;
+      const best = pickBestCandidate(match.candidates, row.release_year);
+      if (
+        write(
           row.release_id,
-          `https://www.discogs.com/release/${best.discogsId}`,
-          JSON.stringify(best.videos),
-          now,
+          match.rule,
           SOURCE_TAG,
-        );
-        matchedByTitle++;
-        continue;
-      }
-
-      // Fallback only tried when the title/artist match found nothing --
-      // (label, catalogue number) recovers releases matchKey misses
-      // purely on title-text differences, without loosening matchKey's
-      // own exact-match precision at all. Tagged with a distinct source
-      // so this tier stays identifiable/reversible from the exact tier.
-      if (row.record_label && row.catalogue_number) {
-        const catnoMatch = catnoIndex.get(catalogKey(row.record_label, row.catalogue_number));
-        if (catnoMatch && catnoMatch.length > 0) {
-          const best = pickBestCandidate(catnoMatch, row.release_year);
-          insert.run(
-            row.release_id,
-            `https://www.discogs.com/release/${best.discogsId}`,
-            JSON.stringify(best.videos),
-            now,
-            CATNO_SOURCE_TAG,
-          );
-          matchedByCatno++;
-        }
+          `https://www.discogs.com/release/${best.discogsId}`,
+          best.videos,
+          best.masterId,
+        )
+      ) {
+        counts[match.rule] = (counts[match.rule] ?? 0) + 1;
       }
     }
     db.exec('COMMIT');
@@ -570,72 +999,75 @@ async function runReleasesTiers(db) {
     throw err;
   }
 
-  const totalMatched = matchedByTitle + matchedByCatno;
-  console.log(
-    `Releases dump matched and wrote ${totalMatched.toLocaleString()} releases: ` +
-      `${matchedByTitle.toLocaleString()} by title/artist (source = "${SOURCE_TAG}"), ` +
-      `${matchedByCatno.toLocaleString()} by catalogue number (source = "${CATNO_SOURCE_TAG}").`,
-  );
+  summarize('Releases dump matched', counts, SOURCE_TAG);
 }
 
-// Tier 3: masters dump, scoped to whatcd releases with no release_extras
-// row at all yet (whatever tiers 1+2 -- run just now, or in an earlier
-// invocation this month -- didn't already cover). Its own transaction,
-// independent of runReleasesTiers's.
-async function runMastersTier(db) {
-  const seenReleaseIds = new Set(); // dedup guard -- first (release_id, artist) row wins, same rule as runReleasesTiers
-  const unmatchedByKey = new Map(); // matchKey -> [{ release_id, year }]
-  let unmatchedCount = 0;
-  for (const row of db
-    .prepare(
-      `SELECT r.id AS release_id, r.name AS release_name, r.year AS release_year, a.name AS artist_name
-       FROM releases r
-       JOIN release_artists ra ON ra.release_id = r.id AND ra.importance = 1
-       JOIN artists a ON a.id = ra.artist_id
-       LEFT JOIN release_extras re ON re.release_id = r.id
-       WHERE r.category_id = 1 AND re.release_id IS NULL
-       ORDER BY r.id, a.name COLLATE NOCASE ASC`,
-    )
-    .iterate()) {
-    if (seenReleaseIds.has(row.release_id)) continue;
-    seenReleaseIds.add(row.release_id);
-    unmatchedCount++;
-    const key = matchKey(row.artist_name, row.release_name);
-    const bucket = unmatchedByKey.get(key);
-    if (bucket) bucket.push({ release_id: row.release_id, year: row.release_year });
-    else unmatchedByKey.set(key, [{ release_id: row.release_id, year: row.release_year }]);
+// The masters dump: the same rules, scoped to whatever the releases dump
+// left without a usable video. Its own transaction, independent of
+// runReleasesTiers's.
+async function runMastersTier(db, write, aliasesByArtist) {
+  const releases = loadWhatcdReleases(db, aliasesByArtist, { onlyUnmatched: true });
+  console.log(`${releases.size.toLocaleString()} music releases still have no video -- trying the masters dump.`);
+
+  // Masters carry no catalogue numbers, so the catno rule contributes
+  // nothing here; passing no catno index makes resolveMatch skip it.
+  const wantedKeys = new Set();
+  for (const row of releases.values()) {
+    for (const rule of MATCH_RULES) {
+      if (rule.index !== 'title') continue;
+      for (const key of rule.keys(row)) if (key && isUsableKey(key)) wantedKeys.add(key);
+    }
   }
 
-  console.log(`${unmatchedCount.toLocaleString()} music releases still have no video match -- trying the masters dump.`);
-  if (unmatchedCount === 0) {
-    console.log('Nothing left to match -- skipping the masters dump entirely.');
+  // Exactly-matched releases whose pressing carried fewer than the cap:
+  // their master's videos are wanted for enrichment, not for matching.
+  const enrichmentTargets = new Map(); // masterId -> [{ releaseId, videos }]
+  for (const row of db
+    .prepare(
+      `SELECT release_id, videos, discogs_master_id
+       FROM release_extras
+       WHERE discogs_master_id IS NOT NULL AND videos IS NOT NULL AND videos <> '[]'`,
+    )
+    .iterate()) {
+    let videos;
+    try {
+      videos = JSON.parse(row.videos);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(videos) || videos.length === 0 || videos.length >= MAX_VIDEOS) continue;
+    const bucket = enrichmentTargets.get(row.discogs_master_id);
+    if (bucket) bucket.push({ releaseId: row.release_id, videos });
+    else enrichmentTargets.set(row.discogs_master_id, [{ releaseId: row.release_id, videos }]);
+  }
+  console.log(
+    `${wantedKeys.size.toLocaleString()} wanted keys; ` +
+      `${enrichmentTargets.size.toLocaleString()} masters wanted to top up already-matched releases.`,
+  );
+
+  if (wantedKeys.size === 0 && enrichmentTargets.size === 0) {
+    console.log('Nothing left to match or enrich -- skipping the masters dump entirely.');
     return;
   }
 
   console.log(`Reading masters dump: ${mastersDumpSource}`);
-  const matchedMasters = await buildMastersMatches(mastersDumpSource, new Set(unmatchedByKey.keys()));
-
-  const insert = db.prepare(
-    'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at, source) VALUES (?, ?, ?, ?, ?)',
+  const { matched, forEnrichment } = await buildMastersMatches(
+    mastersDumpSource,
+    wantedKeys,
+    new Set(enrichmentTargets.keys()),
   );
-  const now = new Date().toISOString();
-  let matchedCount = 0;
 
+  const counts = {};
   db.exec('BEGIN');
   try {
-    for (const [key, wantedReleases] of unmatchedByKey) {
-      const candidates = matchedMasters.get(key);
-      if (!candidates || candidates.length === 0) continue;
-      for (const { release_id, year } of wantedReleases) {
-        const best = pickBestCandidate(candidates, year);
-        insert.run(
-          release_id,
-          `https://www.discogs.com/master/${best.masterId}`,
-          JSON.stringify(best.videos),
-          now,
-          MASTER_SOURCE_TAG,
-        );
-        matchedCount++;
+    for (const row of releases.values()) {
+      const match = resolveMatch(row, { title: matched });
+      if (!match) continue;
+      const best = pickBestCandidate(match.candidates, row.release_year);
+      if (
+        write(row.release_id, match.rule, MASTER_SOURCE_TAG, `https://www.discogs.com/master/${best.masterId}`, best.videos, null)
+      ) {
+        counts[match.rule] = (counts[match.rule] ?? 0) + 1;
       }
     }
     db.exec('COMMIT');
@@ -644,22 +1076,195 @@ async function runMastersTier(db) {
     throw err;
   }
 
-  console.log(`Masters dump matched and wrote ${matchedCount.toLocaleString()} releases (source = "${MASTER_SOURCE_TAG}").`);
+  summarize('Masters dump matched', counts, MASTER_SOURCE_TAG);
+
+  enrichExactMatchesFromMasters(db, enrichmentTargets, forEnrichment);
+}
+
+// Tops up releases that already have a confident match but only one or two
+// videos on the specific pressing, using the videos pooled onto that
+// release's own master. Not a match -- the releases dump told us the master
+// id outright -- so this only ever appends, never replaces, and never
+// touches the row's source tag or its discogs_url.
+//
+// Worth doing because what.tv prunes a dead video via
+// POST /api/tv/:id/video-dead and a release whose only video dies leaves
+// the pool entirely. Roughly a third of matched releases ride on exactly
+// one video.
+function enrichExactMatchesFromMasters(db, targets, forEnrichment) {
+  if (forEnrichment.size === 0) return;
+  const update = db.prepare('UPDATE release_extras SET videos = ? WHERE release_id = ?');
+  let enriched = 0;
+  let videosAdded = 0;
+  db.exec('BEGIN');
+  try {
+    for (const [masterId, extra] of forEnrichment) {
+      for (const { releaseId, videos } of targets.get(masterId) ?? []) {
+        const merged = mergeVideos(videos, extra);
+        if (merged.length === videos.length) continue;
+        update.run(JSON.stringify(merged), releaseId);
+        enriched++;
+        videosAdded += merged.length - videos.length;
+      }
+    }
+    db.exec('COMMIT');
+  } catch (err) {
+    db.exec('ROLLBACK');
+    throw err;
+  }
+  console.log(
+    `Enriched ${enriched.toLocaleString()} already-matched releases with ${videosAdded.toLocaleString()} extra videos from their own masters.`,
+  );
+}
+
+// Everything the end-of-run report compares, taken once before any writes
+// and once after. Counting the videos themselves (rather than just the
+// rows) is what makes the enrichment pass visible -- it adds no releases
+// at all, only videos to releases that already had one.
+function coverageSnapshot(db) {
+  const totals = db
+    .prepare(
+      `SELECT
+         (SELECT COUNT(*) FROM releases WHERE category_id = 1) AS music_releases,
+         (SELECT COUNT(*) FROM releases r
+            JOIN release_extras re ON re.release_id = r.id
+           WHERE r.category_id = 1 AND re.videos IS NOT NULL AND re.videos <> '[]') AS with_videos`,
+    )
+    .get();
+
+  const bySource = new Map();
+  let videos = 0;
+  for (const row of db
+    .prepare(`SELECT source, videos FROM release_extras WHERE videos IS NOT NULL AND videos <> '[]'`)
+    .iterate()) {
+    let n = 0;
+    try {
+      const parsed = JSON.parse(row.videos);
+      if (Array.isArray(parsed)) n = parsed.length;
+    } catch {
+      continue;
+    }
+    videos += n;
+    const key = row.source ?? '(live lookup)';
+    bySource.set(key, (bySource.get(key) ?? 0) + 1);
+  }
+
+  return { musicReleases: totals.music_releases, withVideos: totals.with_videos, videos, bySource };
+}
+
+function delta(before, after) {
+  const d = after - before;
+  const pct = before > 0 ? ` (${d >= 0 ? '+' : ''}${((100 * d) / before).toFixed(1)}%)` : '';
+  return `${d >= 0 ? '+' : ''}${d.toLocaleString()}${pct}`;
+}
+
+const padLeft = (s, n) => String(s).padStart(n);
+const padRight = (s, n) => String(s).padEnd(n);
+
+function reportRow(label, before, after, change) {
+  console.log(padRight(label, 24) + padLeft(before, 13) + padLeft(after, 13) + padLeft(change, 20));
+}
+
+function reportCoverage(before, after) {
+  const shareBefore = (100 * before.withVideos) / before.musicReleases;
+  const shareAfter = (100 * after.withVideos) / after.musicReleases;
+  const shareChange = shareAfter - shareBefore;
+  const unmatchedBefore = before.musicReleases - before.withVideos;
+  const unmatchedAfter = after.musicReleases - after.withVideos;
+
+  console.log('\n================ Coverage ================');
+  reportRow('', 'before', 'after', 'change');
+  reportRow(
+    'releases with video',
+    before.withVideos.toLocaleString(),
+    after.withVideos.toLocaleString(),
+    delta(before.withVideos, after.withVideos),
+  );
+  reportRow(
+    'share of catalogue',
+    `${shareBefore.toFixed(1)}%`,
+    `${shareAfter.toFixed(1)}%`,
+    `${shareChange >= 0 ? '+' : ''}${shareChange.toFixed(1)}pp`,
+  );
+  reportRow(
+    'videos on file',
+    before.videos.toLocaleString(),
+    after.videos.toLocaleString(),
+    delta(before.videos, after.videos),
+  );
+  reportRow(
+    'still unmatched',
+    unmatchedBefore.toLocaleString(),
+    unmatchedAfter.toLocaleString(),
+    delta(unmatchedBefore, unmatchedAfter),
+  );
+
+  console.log('\n================ By source tag ================');
+  const sources = [...new Set([...before.bySource.keys(), ...after.bySource.keys()])].sort();
+  console.log(padRight('source', 34) + padLeft('before', 12) + padLeft('after', 12) + padLeft('change', 14));
+  for (const source of sources) {
+    const b = before.bySource.get(source) ?? 0;
+    const a = after.bySource.get(source) ?? 0;
+    const d = a - b;
+    console.log(
+      padRight(source.slice(0, 33), 34) +
+        padLeft(b.toLocaleString(), 12) +
+        padLeft(a.toLocaleString(), 12) +
+        padLeft(`${d >= 0 ? '+' : ''}${d.toLocaleString()}`, 14),
+    );
+  }
+  console.log();
+}
+
+// Only ever asked when stdin is a terminal. The production wrapper starts
+// this detached under nohup, where there is nobody to answer and a prompt
+// would block the run forever -- that path passes --rerun instead.
+async function askRerun() {
+  if (!process.stdin.isTTY) return null;
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await rl.question('Re-stream the releases dump anyway? [y/N] ')).trim().toLowerCase();
+    return answer === 'y' || answer === 'yes';
+  } finally {
+    rl.close();
+  }
 }
 
 async function main() {
   console.log(`Writing to: ${DB_PATH}`);
   const db = new DatabaseSync(DB_PATH);
-  ensureSourceColumn(db);
+  ensureColumns(db);
+
+  const before = coverageSnapshot(db);
+  console.log(
+    `Starting from ${before.withVideos.toLocaleString()} of ${before.musicReleases.toLocaleString()} music releases with a video ` +
+      `(${((100 * before.withVideos) / before.musicReleases).toFixed(1)}%), ${before.videos.toLocaleString()} videos on file.`,
+  );
+
+  const write = makeWriter(db);
+  const aliasesByArtist = loadAliases(db);
 
   const alreadyImported = db.prepare('SELECT 1 FROM release_extras WHERE source LIKE ? LIMIT 1').get(`${SOURCE_TAG}%`);
-  if (alreadyImported) {
-    console.log(`release_extras already has rows tagged "${SOURCE_TAG}%" -- skipping the releases dump for this run.`);
-  } else {
-    await runReleasesTiers(db);
+  let runReleases = true;
+  if (alreadyImported && !FORCE_RERUN) {
+    console.log(`\nrelease_extras already has rows tagged "${SOURCE_TAG}%" -- this dump has been imported before.`);
+    console.log('Re-running it only changes anything if the matching rules have changed since.');
+    const answer = await askRerun();
+    if (answer === null) {
+      console.log('Not a terminal, so nothing to ask -- skipping the releases dump. Pass --rerun to force it.');
+      runReleases = false;
+    } else if (!answer) {
+      console.log('Skipping the releases dump.');
+      runReleases = false;
+    } else {
+      console.log('Re-streaming the releases dump.');
+    }
   }
 
-  await runMastersTier(db);
+  if (runReleases) await runReleasesTiers(db, write, aliasesByArtist);
+  await runMastersTier(db, write, aliasesByArtist);
+
+  reportCoverage(before, coverageSnapshot(db));
 }
 
 main().catch((err) => {
