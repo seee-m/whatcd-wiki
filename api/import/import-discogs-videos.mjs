@@ -88,6 +88,12 @@ function copy(s) {
 // Discogs sometimes stores artist names in sort form ("Beatles, The") --
 // rewritten to match how what.cd stores the same names ("The Beatles")
 // before the rest of normalization (lowercase, strip accents/punctuation).
+//
+// \p{L}/\p{N} (Unicode letter/number categories, not the ASCII [a-z0-9]
+// this used to use) so a non-Latin title (Hebrew, Cyrillic, CJK, ...)
+// keeps its actual characters instead of being stripped down to an empty
+// string -- which silently made every such release unmatchable, and
+// worse, made them all collide on the same near-empty key.
 function normalize(name) {
   if (!name) return '';
   let s = decodeXmlEntities(name).normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -95,13 +101,32 @@ function normalize(name) {
   if (sortForm) s = `${sortForm[2]} ${sortForm[1]}`;
   return s
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim()
     .replace(/\s+/g, ' ');
 }
 
 function matchKey(artist, title) {
   return `${normalize(artist)}|${normalize(title)}`;
+}
+
+// Catalogue numbers are precise identifiers, not free text -- "SK 032",
+// "SK-032", and "SK032" are the same catalogue number, so inter-token
+// separators are dropped entirely rather than collapsed to a space the
+// way normalize() treats word text.
+function normalizeCatno(catno) {
+  if (!catno) return '';
+  return catno.toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// A second, independent match key alongside matchKey's artist|title --
+// (label, catalogue number) is how physical releases are actually
+// identified in the wild, so it catches releases matchKey misses purely
+// because of title-text differences (translated titles, edition
+// suffixes, punctuation) without loosening matchKey's own precision at
+// all. Only used as a fallback when matchKey finds nothing (see main()).
+function catalogKey(label, catno) {
+  return `${normalize(label)}|${normalizeCatno(catno)}`;
 }
 
 // Streams the gunzipped dump and yields each `<release ...>...</release>`
@@ -189,12 +214,29 @@ function extractRelease(block) {
     : [];
   if (artistNames.length === 0) return null;
 
+  // <labels><label name="Svek" catno="SK032" id="5"/></labels> -- a
+  // release can carry more than one (co-releases, or a different catno
+  // per format), so every (name, catno) pair gets its own catalogKey
+  // entry in the index (see buildIndex).
+  const labelsMatch = block.match(/<labels>([\s\S]*?)<\/labels>/);
+  const labels = labelsMatch
+    ? [...labelsMatch[1].matchAll(/<label\s+([^>]*)\/>/g)]
+        .map((m) => {
+          const attrs = m[1];
+          const name = attrs.match(/name="([^"]*)"/)?.[1];
+          const catno = attrs.match(/catno="([^"]*)"/)?.[1];
+          return name && catno && catno !== 'none' ? { name: copy(decodeXmlEntities(name)), catno: copy(catno) } : null;
+        })
+        .filter((l) => l !== null)
+    : [];
+
   const year = Number(block.match(/<released>(\d{4})/)?.[1]) || null;
 
   return {
     discogsId: Number(idMatch[1]),
     title: copy(decodeXmlEntities(title)),
     artistNames,
+    labels,
     year,
     videos,
   };
@@ -213,7 +255,8 @@ function extractRelease(block) {
 const MAX_FETCH_RETRIES = 5;
 
 async function buildIndex(source) {
-  const index = new Map(); // matchKey -> [{ discogsId, year, videos }]
+  const index = new Map(); // matchKey (artist|title) -> [{ discogsId, year, videos }]
+  const catnoIndex = new Map(); // catalogKey (label|catno) -> [{ discogsId, year, videos }]
   let scanned = 0;
   let withVideos = 0;
   const startedAt = Date.now();
@@ -245,6 +288,12 @@ async function buildIndex(source) {
           if (bucket) bucket.push(entry);
           else index.set(key, [entry]);
         }
+        for (const label of extracted.labels) {
+          const key = catalogKey(label.name, label.catno);
+          const bucket = catnoIndex.get(key);
+          if (bucket) bucket.push(entry);
+          else catnoIndex.set(key, [entry]);
+        }
       }
       break; // the stream ended cleanly -- done
     } catch (err) {
@@ -266,9 +315,10 @@ async function buildIndex(source) {
   }
 
   console.log(
-    `Index built: ${scanned.toLocaleString()} releases scanned, ${withVideos.toLocaleString()} had a usable YouTube video, ${index.size.toLocaleString()} distinct artist|title keys.`,
+    `Index built: ${scanned.toLocaleString()} releases scanned, ${withVideos.toLocaleString()} had a usable YouTube video, ` +
+      `${index.size.toLocaleString()} distinct artist|title keys, ${catnoIndex.size.toLocaleString()} distinct label|catno keys.`,
   );
-  return index;
+  return { index, catnoIndex };
 }
 
 function pickBestCandidate(candidates, year) {
@@ -297,14 +347,16 @@ async function main() {
   console.log(`Reading dump: ${dumpSource}`);
   console.log(`Writing to: ${DB_PATH}`);
 
-  const index = await buildIndex(dumpSource);
+  const { index, catnoIndex } = await buildIndex(dumpSource);
 
   const db = new DatabaseSync(DB_PATH);
   ensureSourceColumn(db);
 
   const releases = db
     .prepare(
-      `SELECT r.id AS release_id, r.name AS release_name, r.year AS release_year, a.name AS artist_name
+      `SELECT r.id AS release_id, r.name AS release_name, r.year AS release_year,
+              r.record_label AS record_label, r.catalogue_number AS catalogue_number,
+              a.name AS artist_name
        FROM releases r
        JOIN release_artists ra ON ra.release_id = r.id AND ra.importance = 1
        JOIN artists a ON a.id = ra.artist_id
@@ -330,24 +382,46 @@ async function main() {
     'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at, source) VALUES (?, ?, ?, ?, ?)',
   );
   const now = new Date().toISOString();
+  const CATNO_SOURCE_TAG = `${SOURCE_TAG}-catno`;
 
-  let matched = 0;
+  let matchedByTitle = 0;
+  let matchedByCatno = 0;
   db.exec('BEGIN');
   try {
     for (const row of mainArtistByRelease.values()) {
-      const key = matchKey(row.artist_name, row.release_name);
-      const candidates = index.get(key);
-      if (!candidates || candidates.length === 0) continue;
+      const titleKeyMatch = index.get(matchKey(row.artist_name, row.release_name));
+      if (titleKeyMatch && titleKeyMatch.length > 0) {
+        const best = pickBestCandidate(titleKeyMatch, row.release_year);
+        insert.run(
+          row.release_id,
+          `https://www.discogs.com/release/${best.discogsId}`,
+          JSON.stringify(best.videos),
+          now,
+          SOURCE_TAG,
+        );
+        matchedByTitle++;
+        continue;
+      }
 
-      const best = pickBestCandidate(candidates, row.release_year);
-      insert.run(
-        row.release_id,
-        `https://www.discogs.com/release/${best.discogsId}`,
-        JSON.stringify(best.videos),
-        now,
-        SOURCE_TAG,
-      );
-      matched++;
+      // Fallback only tried when the title/artist match found nothing --
+      // (label, catalogue number) recovers releases matchKey misses
+      // purely on title-text differences, without loosening matchKey's
+      // own exact-match precision at all. Tagged with a distinct source
+      // so this tier stays identifiable/reversible from the exact tier.
+      if (row.record_label && row.catalogue_number) {
+        const catnoMatch = catnoIndex.get(catalogKey(row.record_label, row.catalogue_number));
+        if (catnoMatch && catnoMatch.length > 0) {
+          const best = pickBestCandidate(catnoMatch, row.release_year);
+          insert.run(
+            row.release_id,
+            `https://www.discogs.com/release/${best.discogsId}`,
+            JSON.stringify(best.videos),
+            now,
+            CATNO_SOURCE_TAG,
+          );
+          matchedByCatno++;
+        }
+      }
     }
     db.exec('COMMIT');
   } catch (err) {
@@ -355,7 +429,12 @@ async function main() {
     throw err;
   }
 
-  console.log(`Matched and wrote ${matched.toLocaleString()} releases (source = "${SOURCE_TAG}").`);
+  const totalMatched = matchedByTitle + matchedByCatno;
+  console.log(
+    `Matched and wrote ${totalMatched.toLocaleString()} releases: ` +
+      `${matchedByTitle.toLocaleString()} by title/artist (source = "${SOURCE_TAG}"), ` +
+      `${matchedByCatno.toLocaleString()} by catalogue number (source = "${CATNO_SOURCE_TAG}").`,
+  );
 }
 
 main().catch((err) => {
