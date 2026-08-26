@@ -352,7 +352,18 @@ async function main() {
   const db = new DatabaseSync(DB_PATH);
   ensureSourceColumn(db);
 
-  const releases = db
+  // Same "one main artist, alphabetically first if several" rule the live
+  // lookup uses (api/src/routes/torrents.ts) -- keeps bulk- and live-
+  // matched releases consistent with each other. Rows are pre-sorted by
+  // (release_id, artist name), so the first row seen per release_id is
+  // already the right one. Streamed via .iterate() rather than .all() --
+  // by this point the in-memory Discogs index (millions of entries) is
+  // already resident, and materializing this whole join as a second
+  // multi-million-row array on top of it is what pushed the process OOM
+  // in production. Building the Map directly off the iterator means only
+  // one copy of this data is ever alive at once.
+  const mainArtistByRelease = new Map();
+  for (const row of db
     .prepare(
       `SELECT r.id AS release_id, r.name AS release_name, r.year AS release_year,
               r.record_label AS record_label, r.catalogue_number AS catalogue_number,
@@ -363,15 +374,7 @@ async function main() {
        WHERE r.category_id = 1
        ORDER BY r.id, a.name COLLATE NOCASE ASC`,
     )
-    .all();
-
-  // Same "one main artist, alphabetically first if several" rule the live
-  // lookup uses (api/src/routes/torrents.ts) -- keeps bulk- and live-
-  // matched releases consistent with each other. Rows are pre-sorted by
-  // (release_id, artist name), so the first row seen per release_id is
-  // already the right one.
-  const mainArtistByRelease = new Map();
-  for (const row of releases) {
+    .iterate()) {
     if (!mainArtistByRelease.has(row.release_id)) {
       mainArtistByRelease.set(row.release_id, row);
     }
