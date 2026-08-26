@@ -13,3 +13,6 @@ whatcd-goodbye/
 
 # Claude Code local (per-machine) settings, not shared project config.
 .claude/settings.local.json
+
+# Agent working notes -- useful locally, not meant to be committed.
+AGENTS.md
