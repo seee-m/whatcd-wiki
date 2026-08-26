@@ -72,7 +72,7 @@ export function Home() {
             <Link to="/list">Lists</Link> &mdash; Create shareable lists from the what.cd archive
           </li>
           <li>
-            <Link to="/tv">what.tv</Link> &mdash; Surf over 300k releases ready to play instantly{' '}
+            <Link to="/tv">what.tv</Link> &mdash; Surf over <strong>400k</strong> releases ready to play instantly{' '}
             <img src={newGif} alt="New" className="new-badge" />
           </li>
         </ul>
