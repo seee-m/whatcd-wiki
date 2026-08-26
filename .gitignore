@@ -14,9 +14,6 @@ whatcd-goodbye/
 # Claude Code local (per-machine) settings, not shared project config.
 .claude/settings.local.json
 
-# Agent working notes -- useful locally, not meant to be committed.
-AGENTS.md
-
 # Local-only maintenance script (scales the prod machine up/down via
 # flyctl and runs the Discogs bulk import against it) -- run by hand from
 # a terminal that's already `fly auth login`'d, not part of the app --
