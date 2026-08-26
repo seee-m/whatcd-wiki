@@ -65,7 +65,18 @@ export function TvPlay() {
     return p;
   }
 
-  async function goNext() {
+  // `push` decides whether this hop leaves its own back-navigable history
+  // entry. True for a hop the visitor actually watched (manual "Next", or
+  // a video that played to completion) -- those push. False for a skip
+  // past a release that was never really shown: a dead/unplayable video
+  // (onError below) or a release with no embeddable video at all (the
+  // extras effect below). Those replace the current entry instead, so a
+  // release whose video failed never becomes something Back can land on --
+  // it's overwritten by whatever comes next. Also strips any `song` param
+  // carried over from the release being left -- that identifies a specific
+  // *previous* release's video and would otherwise be misread as the
+  // target for the new one.
+  async function goNext(push: boolean) {
     if (!release) return;
     setNextLoading(true);
     setNextError(null);
@@ -74,7 +85,9 @@ export function TvPlay() {
       fp.set('exclude', String(release.id));
       const { id: newId, poolHealthy, poolThreshold } = await api.tvRandom(fp);
       setPool({ healthy: poolHealthy, threshold: poolThreshold });
-      navigate(`/tv/${newId}?${params.toString()}`, { replace: true });
+      const target = new URLSearchParams(params);
+      target.delete('song');
+      navigate(`/tv/${newId}?${target.toString()}`, { replace: !push });
     } catch (err) {
       setNextError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -143,22 +156,47 @@ export function TvPlay() {
     };
   }, [id]);
 
-  // Picks one song at random out of the release's videos, once per
-  // release -- what.tv plays a single track per station hop, not the
-  // release's full video list. Only ever picks from actually-embeddable
-  // YouTube videos: the server already filters new lookups down to those
-  // (see api/src/routes/tv.ts), but release_extras is shared with the
-  // regular release page's cache, so an older row populated before that
-  // filter existed can still hold a non-YouTube (e.g. Vimeo) video --
-  // if that leaves nothing playable, skip straight to another release
-  // instead of showing a dead player.
+  // Picks a song out of the release's videos, once per release -- what.tv
+  // plays a single track per station hop, not the release's full video
+  // list. If the URL already names a song (arrived here via the browser's
+  // Back/Forward rather than a fresh hop), honor it instead of rolling
+  // again -- otherwise every Back/Forward would silently swap in a
+  // different song for the same release, when what a visitor going back
+  // expects is exactly what was playing before. Falls back to a random
+  // pick (same as a fresh hop) when there's no song in the URL yet, or the
+  // one named there is no longer among the release's playable videos (e.g.
+  // pruned as dead by another visitor since); either way the chosen song
+  // is then stamped into the URL via `replace` so the entry stays
+  // self-consistent for a later visit.
+  //
+  // Only ever picks from actually-embeddable YouTube videos: the server
+  // already filters new lookups down to those (see api/src/routes/tv.ts),
+  // but release_extras is shared with the regular release page's cache, so
+  // an older row populated before that filter existed can still hold a
+  // non-YouTube (e.g. Vimeo) video -- if that leaves nothing playable,
+  // skip straight to another release instead of showing a dead player.
+  // That skip doesn't push a history entry (see goNext's `push` param
+  // above) since this release was never actually shown.
+  //
+  // Deliberately keyed on `extras` alone, not `params` -- this should run
+  // once per release, when its videos arrive, not on every filter-param
+  // change or on the URL update it makes itself below.
   useEffect(() => {
     if (!extras) return;
     const playable = extras.videos.filter((v) => youtubeVideoId(v.url));
-    if (playable.length > 0) {
-      setSong(playable[Math.floor(Math.random() * playable.length)]);
-    } else {
-      goNextRef.current();
+    if (playable.length === 0) {
+      goNextRef.current(false);
+      return;
+    }
+    const wantedId = params.get('song');
+    const matched = wantedId ? playable.find((v) => youtubeVideoId(v.url) === wantedId) : undefined;
+    const chosen = matched ?? playable[Math.floor(Math.random() * playable.length)];
+    setSong(chosen);
+    const chosenId = youtubeVideoId(chosen.url);
+    if (chosenId && params.get('song') !== chosenId) {
+      const next = new URLSearchParams(params);
+      next.set('song', chosenId);
+      navigate(`${location.pathname}?${next.toString()}`, { replace: true });
     }
   }, [extras]);
 
@@ -207,7 +245,7 @@ export function TvPlay() {
               }
             },
             onStateChange: (e) => {
-              if (e.data === YT.PlayerState.ENDED) goNextRef.current();
+              if (e.data === YT.PlayerState.ENDED) goNextRef.current(true);
             },
             // YouTube error codes: 100 = video not found (removed or made
             // private), 101/150 = owner has disabled embedding -- both are
@@ -217,7 +255,9 @@ export function TvPlay() {
             // and 5 (HTML5 player error) aren't about the video's
             // existence -- could be a transient/local glitch -- so this
             // viewer still skips ahead, but the cache isn't touched on
-            // their behalf.
+            // their behalf. Either way this release never gets a stable
+            // history entry (push: false) -- its video didn't play, so
+            // Back shouldn't be able to land here.
             onError: (e) => {
               const deadSong = songRef.current;
               const releaseId = releaseIdRef.current;
@@ -225,7 +265,7 @@ export function TvPlay() {
               if (isPermanentlyUnplayable && deadSong && releaseId !== null) {
                 api.tvReportDeadVideo(releaseId, deadSong.url).catch(() => {});
               }
-              goNextRef.current();
+              goNextRef.current(false);
             },
           },
         });
@@ -275,7 +315,12 @@ export function TvPlay() {
             </table>
             {nextError && <p className="external-disclaimer">{nextError}</p>}
             <p className="action-row tv-radio-actions">
-              <button type="button" className="dice-button auto-width-button" onClick={goNext} disabled={nextLoading}>
+              <button
+                type="button"
+                className="dice-button auto-width-button"
+                onClick={() => goNext(true)}
+                disabled={nextLoading}
+              >
                 {nextLoading ? 'Finding next…' : 'Next'}
               </button>
               <button
