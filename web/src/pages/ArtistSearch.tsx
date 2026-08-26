@@ -3,6 +3,8 @@ import { Link, useSearchParams } from 'react-router-dom';
 import { api, type ArtistRef } from '../lib/api';
 import { Box } from '../components/Box';
 
+const SEARCH_DEBOUNCE_MS = 250;
+
 export function ArtistSearch() {
   const [params, setParams] = useSearchParams();
   const q = params.get('q') ?? '';
@@ -14,11 +16,24 @@ export function ArtistSearch() {
       setResults([]);
       return;
     }
+    // The input drives the URL on every keystroke, so without this each
+    // one costs an FTS query on the single-threaded server.
     setLoading(true);
-    api
-      .artistSearch(q)
-      .then((r) => setResults(r.items))
-      .finally(() => setLoading(false));
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api
+        .artistSearch(q)
+        .then((r) => {
+          if (!cancelled) setResults(r.items);
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    }, SEARCH_DEBOUNCE_MS);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
   }, [q]);
 
   return (

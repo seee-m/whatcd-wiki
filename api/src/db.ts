@@ -13,6 +13,23 @@ const DB_PATH = process.env.SQLITE_PATH || path.join(os.homedir(), 'Library/Appl
 // once per release. Everything else the app does is still reads only.
 export const db = new DatabaseSync(DB_PATH);
 
+// import.mjs finishes with `PRAGMA journal_mode = DELETE` and nothing set
+// it back, so the served database ran in rollback-journal mode: the
+// lifetime-visitor UPDATE (routes/visitors.ts) fires once per page load,
+// and in that mode each one takes an exclusive lock and fsyncs, blocking
+// every concurrent reader on a single-threaded server. WAL lets that write
+// proceed alongside reads. NORMAL trades an fsync per commit for one per
+// checkpoint -- the durability at risk is a hit counter and best-effort
+// external-lookup caches, all re-derivable, and nothing here is a
+// transaction anyone would miss after a power loss.
+//
+// The Dropbox/SQLITE_BUSY trouble noted in the import script was about a
+// database file living *inside* a sync folder; both the dev default above
+// and the deployed /data volume are outside one, so WAL is safe in both.
+// journal_mode persists in the file; synchronous is per connection.
+db.exec('PRAGMA journal_mode = WAL');
+db.exec('PRAGMA synchronous = NORMAL');
+
 // release_covers postdates the original import; create it if this DB was
 // built before the feature existed, so an existing install doesn't need a
 // full re-import just to pick it up.
@@ -73,7 +90,7 @@ db.exec(`INSERT OR IGNORE INTO site_visits (id, count) VALUES (1, 0)`);
 
 export type SqlParam = string | number | bigint | null;
 
-export const CATEGORIES = [
+const CATEGORIES = [
   { id: 1, name: 'Music', icon: 'music.png' },
   { id: 2, name: 'Applications', icon: 'apps.png' },
   { id: 3, name: 'E-Books', icon: 'ebook.png' },
@@ -88,7 +105,7 @@ export function categoryName(id: number): string {
 }
 
 // The real Gazelle $ReleaseTypes mapping (classes/config.template).
-export const RELEASE_TYPES: Record<number, string> = {
+const RELEASE_TYPES: Record<number, string> = {
   1: 'Album',
   3: 'Soundtrack',
   5: 'EP',

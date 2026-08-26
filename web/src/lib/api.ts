@@ -4,17 +4,6 @@ export interface ArtistRef {
   importance?: number;
 }
 
-export interface Category {
-  id: number;
-  name: string;
-  icon: string;
-}
-
-export interface ReleaseType {
-  id: number;
-  name: string;
-}
-
 export interface ReleaseListItem {
   id: number;
   name: string;
@@ -47,9 +36,7 @@ export interface TorrentEdition {
   has_log: number;
   has_cue: number;
   log_score: number;
-  file_list: string;
   size: number;
-  time: string | null;
 }
 
 export interface ReleaseDetail {
@@ -183,11 +170,17 @@ async function post<T>(path: string, body: unknown): Promise<T> {
 }
 
 export const api = {
-  categories: () => get<Category[]>('/api/categories'),
-  releaseTypes: () => get<ReleaseType[]>('/api/release-types'),
   torrents: (params: URLSearchParams) => get<ReleaseList>(`/api/torrents?${params}`),
   randomTorrent: () => get<{ id: number }>('/api/torrents/random'),
-  torrent: (id: number | string) => get<ReleaseDetail>(`/api/torrents/${id}`),
+  // summary skips the editions and collages the server would otherwise
+  // assemble -- for callers like what.tv that render neither.
+  torrent: (id: number | string, summary = false) =>
+    get<ReleaseDetail>(`/api/torrents/${id}${summary ? '?fields=summary' : ''}`),
+  // Raw file lists for one release's editions, keyed by torrent id. Kept
+  // out of the release payload because it dwarfs everything else in it
+  // (see api/src/routes/torrents.ts); fetched when a visitor opens the
+  // "View file list" toggle.
+  torrentFiles: (id: number | string) => get<{ files: Record<number, string> }>(`/api/torrents/${id}/files`),
   // Not plain `get()` -- a "no matches" 404 carries a human-readable
   // `error` message (see api/src/routes/tv.ts) that what.tv surfaces
   // directly to the user instead of a generic "404" failure.

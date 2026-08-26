@@ -1,37 +1,33 @@
 import type { FastifyInstance } from 'fastify';
 import { db, type SqlParam } from '../db.js';
-import { fetchDiscogsExtras } from '../discogsRelease.js';
 
-// what.tv picks a random release matching the caller's tag/year/type filters
-// and requires it to have at least one *YouTube* Discogs video, since the
-// whole point of the page is a big embedded YouTube player -- Discogs
-// videos aren't always YouTube (Vimeo etc. show up occasionally), and those
-// aren't embeddable by web/src/lib/youtube.ts, so a release with only
-// non-YouTube videos is exactly as dead-end as one with none. Same category
-// restriction as cover/extras lookups (routes/torrents.ts) -- only music
-// releases get Discogs videos looked up.
+// what.tv picks a random release matching the caller's tag/year/type
+// filters that has at least one *YouTube* video on file, since the whole
+// point of the page is a big embedded YouTube player -- Discogs videos
+// aren't always YouTube (Vimeo etc. show up occasionally), and those aren't
+// embeddable by web/src/lib/youtube.ts, so a release with only non-YouTube
+// videos is exactly as dead-end as one with none.
 const MUSIC_CATEGORY_ID = 1;
 
-// Live Discogs lookups (2 HTTP calls each) are only attempted for releases
-// that have never been checked before -- capped so one "Next" click can't
-// spend unbounded time on a narrow/empty filter combo.
-const MAX_LIVE_ATTEMPTS = 6;
+// what.tv reads release_extras and nothing else. It does NOT call Discogs.
+//
+// It used to: a background pre-warmer ticked every 8 seconds forever, one
+// roll in five kicked off a live discovery batch, and a cold filter combo
+// blocked the request on a Discogs round-trip. That machinery predates the
+// bulk dump importer (import/import-discogs-videos.mjs), which is now where
+// videos come from -- 421,052 of the 432,605 rows on file arrived that way
+// against 11,553 from live discovery, so the live path was contributing a
+// rounding error's worth of coverage while making Discogs calls forever and
+// blocking the one JS thread to do it. Videos come from dump imports now;
+// run the importer to grow the pool.
+//
+// The release page (routes/torrents.ts) still falls back to a live Discogs
+// lookup on a cache miss -- that's a single deliberate request for a
+// release someone is actually looking at, not a crawl.
 
-// Once this many releases matching a given filter combo are *known* (from
-// release_extras) to have a YouTube video, a plain random SQL pick from
-// that set gives plenty of variety on its own -- below it, discovery always
-// runs (see POOL_HEALTHY_SIZE's use below) so a thin pool never freezes at
-// whatever was found first.
+// Below this many known-playable releases for a filter combo, the frontend
+// warns that the station will be repetitive (see TvPlay.tsx).
 const POOL_HEALTHY_SIZE = 12;
-
-// Even once a filter combo's pool is "healthy", keep discovering on this
-// fraction of rolls anyway -- otherwise the reachable set permanently caps
-// out at POOL_HEALTHY_SIZE-ish and "Next" is a shuffle of the same dozen
-// releases forever instead of eventually reaching every release that has a
-// video. Combined with the background pre-warmer below, this is what makes
-// "any release with a YouTube video" the actual long-run target rather
-// than "whichever ones got discovered first".
-const EXPLORE_PROBABILITY = 0.2;
 
 // Mirrors web/src/lib/youtube.ts's youtubeVideoId regex -- kept as a
 // separate copy rather than a shared package since it's one line and the
@@ -41,80 +37,118 @@ function youtubeId(url: string): string | null {
   return url.match(YOUTUBE_ID_RE)?.[1] ?? null;
 }
 
+// "Next" used to re-run the random draw every single time, and that draw is
+// the expensive part of what.tv: it walks every music release matching the
+// filters, probes release_extras for each, then sorts the lot into a temp
+// b-tree to keep one row -- 209ms unfiltered against the real database.
+// Since node:sqlite is synchronous, that is 209ms of the one JS thread
+// blocked for every other visitor too, and a station left playing
+// auto-advances into it at the end of every track.
+//
+// Drawing several picks at once costs the same as drawing one (measured:
+// LIMIT 8 at 192ms vs LIMIT 1 at 216ms -- the scan and sort dominate, the
+// LIMIT is free), so each draw now fills a small per-filter queue and the
+// next few Nexts are answered from memory. When the queue runs low it is
+// topped up on a setImmediate, off the request path, so a visitor only ever
+// waits for a draw if they empty the queue faster than it refills.
+//
+// This does not change the distribution: ORDER BY RANDOM() LIMIT n returns
+// a uniformly random sample in random order, so each id served is still a
+// uniform draw over the matching releases. The only difference from drawing
+// one at a time is that a single batch won't repeat a release inside itself
+// -- which for a radio is the better behaviour anyway.
+const READY_PICKS = 8;
+const REFILL_WHEN_BELOW = 5;
+const MAX_TRACKED_COMBOS = 64;
+
+interface ReadyPool {
+  ids: number[];
+  healthy: boolean;
+}
+
+const readyPools = new Map<string, ReadyPool>();
+const refillsInFlight = new Set<string>();
+
+// Deliberately excludes `exclude`: it carries the release currently
+// playing and so differs on every Next, which would make each request its
+// own cache key and defeat the whole thing. It's applied in JS at serve
+// time instead (see takeReadyPick).
+function poolKey(tagIds: number[], typeIds: number[], yearFrom?: number, yearTo?: number): string {
+  return JSON.stringify([[...tagIds].sort((a, b) => a - b), [...typeIds].sort((a, b) => a - b), yearFrom ?? null, yearTo ?? null]);
+}
+
+function rememberPool(key: string, pool: ReadyPool): void {
+  readyPools.delete(key);
+  readyPools.set(key, pool);
+  // Map iterates in insertion order and every read re-inserts, so the first
+  // key is the least recently used one.
+  while (readyPools.size > MAX_TRACKED_COMBOS) {
+    const oldest = readyPools.keys().next().value;
+    if (oldest === undefined) break;
+    readyPools.delete(oldest);
+  }
+}
+
+// A queued id can go stale between being drawn and being served -- the
+// player reports dead videos (see /video-dead below) and prunes them, so a
+// release that had a video when drawn may have none by now. That's one
+// indexed lookup to rule out, far cheaper than serving a release the player
+// will immediately skip.
+const stillHasVideoStmt = () =>
+  db.prepare("SELECT 1 AS ok FROM release_extras WHERE release_id = ? AND videos IS NOT NULL AND videos != '[]'");
+
+function takeReadyPick(pool: ReadyPool, exclude: number | undefined): number | null {
+  const check = stillHasVideoStmt();
+  while (pool.ids.length > 0) {
+    const id = pool.ids.shift()!;
+    if (id === exclude) continue;
+    if (check.get(id)) return id;
+  }
+  return null;
+}
+
+function drawPicks(fromClause: string, whereClause: string, params: SqlParam[], limit: number): number[] {
+  return (
+    db
+      .prepare(
+        `SELECT DISTINCT r.id ${fromClause}
+         JOIN release_extras re ON re.release_id = r.id
+         ${whereClause} AND re.videos IS NOT NULL AND re.videos != '[]'
+         ORDER BY RANDOM() LIMIT ?`,
+      )
+      .all(...params, limit) as { id: number }[]
+  ).map((r) => r.id);
+}
+
+// Deferred to a setImmediate so the draw lands after the current response
+// has gone out. It still blocks the thread while it runs -- node:sqlite is
+// synchronous and nothing can change that -- but it blocks between
+// requests rather than inside one, and now happens once per READY_PICKS
+// Nexts instead of once per Next.
+function scheduleRefill(key: string, fromClause: string, whereClause: string, params: SqlParam[], healthy: boolean): void {
+  if (refillsInFlight.has(key)) return;
+  refillsInFlight.add(key);
+  setImmediate(() => {
+    try {
+      const existing = readyPools.get(key);
+      const ids = drawPicks(fromClause, whereClause, params, READY_PICKS);
+      if (ids.length > 0) {
+        const merged = [...(existing?.ids ?? []), ...ids.filter((id) => !existing?.ids.includes(id))];
+        rememberPool(key, { ids: merged.slice(0, READY_PICKS * 2), healthy });
+      }
+    } catch {
+      // Best-effort top-up -- the next request just draws synchronously.
+    } finally {
+      refillsInFlight.delete(key);
+    }
+  });
+}
+
 function parseIds(raw: string | undefined): number[] {
   return (raw ?? '')
     .split(',')
     .map(Number)
     .filter((n) => Number.isInteger(n) && n > 0);
-}
-
-// Checks one never-looked-up release against Discogs and caches the result
-// -- shared by the live discovery loop below and the background
-// pre-warmer, so there's exactly one place that writes release_extras from
-// a fresh lookup. Returns whether it turned out to have a playable video.
-async function checkCandidateForVideo(id: number, name: string): Promise<boolean> {
-  const primaryArtist = db
-    .prepare(
-      `SELECT a.name FROM release_artists ra JOIN artists a ON a.id = ra.artist_id
-       WHERE ra.release_id = ? AND ra.importance = 1 ORDER BY a.name LIMIT 1`,
-    )
-    .get(id) as { name: string } | undefined;
-
-  const result = await fetchDiscogsExtras(primaryArtist?.name ?? '', name).catch(() => null);
-  const youtubeVideos = result?.videos.filter((v) => youtubeId(v.url)) ?? [];
-
-  // Cached with only the YouTube-embeddable videos kept -- this row is
-  // shared with the regular release page's /extras endpoint, so a
-  // non-YouTube video Discogs returned (Vimeo etc.) is simply dropped
-  // rather than stored dead, since neither page can embed it anyway.
-  db.prepare(
-    'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at) VALUES (?, ?, ?, ?)',
-  ).run(id, result?.discogsUrl ?? null, result ? JSON.stringify(youtubeVideos) : null, new Date().toISOString());
-
-  return youtubeVideos.length > 0;
-}
-
-// Samples up to MAX_LIVE_ATTEMPTS never-looked-up releases matching the
-// given filters. Shared by the cold-start path (which awaits it directly)
-// and the background-discovery path below (which doesn't).
-function fetchUncachedCandidates(
-  fromClause: string,
-  whereClause: string,
-  params: SqlParam[],
-): { id: number; name: string }[] {
-  return db
-    .prepare(
-      `SELECT DISTINCT r.id, r.name ${fromClause}
-       LEFT JOIN release_extras re ON re.release_id = r.id
-       ${whereClause} AND re.release_id IS NULL
-       ORDER BY RANDOM() LIMIT ?`,
-    )
-    .all(...params, MAX_LIVE_ATTEMPTS) as { id: number; name: string }[];
-}
-
-// Checks a batch of candidates one at a time, same throttled/sequential
-// pace as before -- the only difference from the old inline loop is that
-// nothing here is awaited by the request handler, so it can't add a
-// single millisecond to the response the caller already got.
-async function discoverCandidatesInBackground(candidates: { id: number; name: string }[]): Promise<void> {
-  for (const candidate of candidates) {
-    try {
-      await checkCandidateForVideo(candidate.id, candidate.name);
-    } catch {
-      // Best-effort background growth -- move on to the next candidate.
-    }
-  }
-}
-
-// Used by the "healthy pool, but this roll landed in the explore slice"
-// case: samples fresh candidates and checks them, entirely after the
-// response for the triggering request has already been sent.
-async function discoverInBackground(fromClause: string, whereClause: string, params: SqlParam[]): Promise<void> {
-  try {
-    await discoverCandidatesInBackground(fetchUncachedCandidates(fromClause, whereClause, params));
-  } catch {
-    // Best-effort background growth.
-  }
 }
 
 export default async function tvRoutes(app: FastifyInstance) {
@@ -160,11 +194,32 @@ export default async function tvRoutes(app: FastifyInstance) {
       where.push('r.year <= ?');
       params.push(yearTo);
     }
-    if (exclude !== undefined && Number.isInteger(exclude)) {
-      where.push('r.id != ?');
-      params.push(exclude);
-    }
     const whereClause = `WHERE ${where.join(' AND ')}`;
+
+    // The currently-playing release is filtered out separately rather than
+    // folded into whereClause/params above: it changes on every Next, so
+    // baking it in would give each request a distinct ready-pool key and
+    // no pick would ever be reused. Queries that still want it append it;
+    // the ready pool skips the id in JS instead (takeReadyPick).
+    const hasExclude = exclude !== undefined && Number.isInteger(exclude);
+    const whereClauseExcl = hasExclude ? `${whereClause} AND r.id != ?` : whereClause;
+    const paramsExcl: SqlParam[] = hasExclude ? [...params, exclude] : params;
+
+    // Serve a pick drawn on an earlier request if one is waiting -- this is
+    // the path that makes "Next" instant instead of a 209ms draw.
+    const key = poolKey(tagIds, typeIds, yearFrom, yearTo);
+    const ready = readyPools.get(key);
+    if (ready) {
+      const queued = takeReadyPick(ready, exclude);
+      if (queued !== null) {
+        rememberPool(key, ready);
+        if (ready.ids.length < REFILL_WHEN_BELOW) {
+          scheduleRefill(key, fromClause, whereClause, params, ready.healthy);
+        }
+        return { id: queued, poolHealthy: ready.healthy, poolThreshold: POOL_HEALTHY_SIZE };
+      }
+      readyPools.delete(key);
+    }
 
     // How many releases matching these filters are already known (from a
     // prior /extras lookup, here or on the release's own page) to have a
@@ -175,64 +230,39 @@ export default async function tvRoutes(app: FastifyInstance) {
       .prepare(
         `SELECT DISTINCT r.id ${fromClause}
          JOIN release_extras re ON re.release_id = r.id
-         ${whereClause} AND re.videos IS NOT NULL AND re.videos != '[]'
+         ${whereClauseExcl} AND re.videos IS NOT NULL AND re.videos != '[]'
          LIMIT ?`,
       )
-      .all(...params, POOL_HEALTHY_SIZE + 1) as { id: number }[];
+      .all(...paramsExcl, POOL_HEALTHY_SIZE + 1) as { id: number }[];
 
     const poolIsHealthy = cachedMatches.length > POOL_HEALTHY_SIZE;
-    const shouldExplore = !poolIsHealthy || Math.random() < EXPLORE_PROBABILITY;
 
-    // The actual fix for "Next sometimes takes 10-20s": whenever there's
-    // already *something* to offer (any cached match at all, not just a
-    // fully "healthy" pool), respond immediately and let any discovery
-    // needed for pool growth continue in the background. Previously this
-    // synchronously awaited the whole discovery loop below even on an
-    // already-healthy pool whenever a roll landed in the 20% explore
-    // slice -- despite having a perfectly good cached answer sitting
-    // right there, one in five rolls on a *healthy* tag still paid the
-    // full up-to-6-candidate, throttled-Discogs-call cost before
-    // responding. Nobody should ever have to wait through a Discogs
-    // round-trip just because the pool could stand to be bigger.
     if (cachedMatches.length > 0) {
-      const pick = poolIsHealthy
-        ? (
-            db
-              .prepare(
-                `SELECT DISTINCT r.id ${fromClause}
-                 JOIN release_extras re ON re.release_id = r.id
-                 ${whereClause} AND re.videos IS NOT NULL AND re.videos != '[]'
-                 ORDER BY RANDOM() LIMIT 1`,
-              )
-              .get(...params) as { id: number }
-          ).id
-        : cachedMatches[Math.floor(Math.random() * cachedMatches.length)].id;
-
-      if (shouldExplore) {
-        void discoverInBackground(fromClause, whereClause, params);
+      // Same draw as before, just keeping the rest of what it returns
+      // instead of throwing it away -- LIMIT READY_PICKS costs what
+      // LIMIT 1 cost, so the following few Nexts come free.
+      let pick: number;
+      if (poolIsHealthy) {
+        const drawn = drawPicks(fromClause, whereClause, params, READY_PICKS);
+        const usable = drawn.filter((id) => id !== exclude);
+        // A draw this size effectively always returns something on a
+        // healthy pool, but fall back rather than assume it.
+        pick = usable.length > 0 ? usable[0] : cachedMatches[Math.floor(Math.random() * cachedMatches.length)].id;
+        if (usable.length > 1) rememberPool(key, { ids: usable.slice(1), healthy: true });
+      } else {
+        pick = cachedMatches[Math.floor(Math.random() * cachedMatches.length)].id;
       }
-      // poolHealthy/poolThreshold let the frontend warn upfront that
-      // "Next" might be slow for this filter combo (see TvPlay.tsx's
-      // warning box) -- this pick was fast either way, but the *next*
-      // roll on the same combo might not be if it's still thin.
+
+      // poolHealthy/poolThreshold let the frontend tell the visitor this
+      // station has little to draw on and will repeat itself (see
+      // TvPlay.tsx's warning box).
       return { id: pick, poolHealthy: poolIsHealthy, poolThreshold: POOL_HEALTHY_SIZE };
     }
 
-    // Totally cold (zero cached matches): this request has no choice but
-    // to wait for the first live hit, since there's nothing else to
-    // offer -- but it stops as soon as one is found rather than checking
-    // the full batch, and hands off whatever candidates are left to the
-    // same background path once it does.
-    const candidates = fetchUncachedCandidates(fromClause, whereClause, params);
-    for (let i = 0; i < candidates.length; i++) {
-      const candidate = candidates[i];
-      if (await checkCandidateForVideo(candidate.id, candidate.name)) {
-        const rest = candidates.slice(i + 1);
-        if (rest.length > 0) void discoverCandidatesInBackground(rest);
-        return { id: candidate.id, poolHealthy: false, poolThreshold: POOL_HEALTHY_SIZE };
-      }
-    }
-
+    // Nothing on file for these filters. This used to block the caller on
+    // up to six throttled Discogs round-trips hoping to turn one up, which
+    // is where "Next sometimes takes 10-20 seconds" came from. There is
+    // nothing to wait for now -- say so straight away.
     reply.code(404);
     return { error: 'No releases with video found for these filters. Try broadening your search.' };
   });
@@ -267,53 +297,4 @@ export default async function tvRoutes(app: FastifyInstance) {
     db.prepare('UPDATE release_extras SET videos = ? WHERE release_id = ?').run(JSON.stringify(remaining), id);
     return { removed: true, remaining: remaining.length };
   });
-}
-
-// Slow, continuous background discovery -- decoupled entirely from user
-// requests, so it costs nothing on the request path. Ticks once every
-// PREWARM_INTERVAL_MS, each tick checking exactly one never-looked-up
-// music release against Discogs, so coverage keeps growing globally (not
-// just for tags/filters someone happens to roll) even with zero visitors.
-// At the default interval that's ~7.5 releases/min (~15 Discogs calls/min
-// worst case), comfortably under Discogs' ~60/min budget with plenty of
-// headroom left for live user-triggered discovery too -- raise the
-// interval to warm up faster at the cost of more sustained Discogs
-// traffic, or lower it to ease off further.
-const PREWARM_INTERVAL_MS = 8000;
-
-export function startTvPrewarm(): void {
-  if (!process.env.DISCOGS_TOKEN) return; // fetchDiscogsExtras is a no-op without one anyway
-  setInterval(() => {
-    void prewarmTick();
-  }, PREWARM_INTERVAL_MS);
-}
-
-async function prewarmTick(): Promise<void> {
-  try {
-    const bounds = db.prepare('SELECT MIN(id) lo, MAX(id) hi FROM releases WHERE category_id = ?').get(
-      MUSIC_CATEGORY_ID,
-    ) as { lo: number | null; hi: number | null };
-    if (bounds.lo === null || bounds.hi === null) return;
-
-    // A random id seek (`id >= seed ORDER BY id LIMIT 1`) walks the
-    // releases primary-key index instead of scanning the table -- cheap
-    // even at ~1M rows. Not perfectly uniform (ids just after a run of
-    // already-checked ones get hit more often), which is fine here: this
-    // job's only goal is steadily covering the whole catalog over time,
-    // not a fair per-tick sample.
-    const seed = bounds.lo + Math.floor(Math.random() * (bounds.hi - bounds.lo + 1));
-    const candidate = db
-      .prepare(
-        `SELECT r.id, r.name FROM releases r
-         LEFT JOIN release_extras re ON re.release_id = r.id
-         WHERE r.category_id = ? AND r.id >= ? AND re.release_id IS NULL
-         ORDER BY r.id LIMIT 1`,
-      )
-      .get(MUSIC_CATEGORY_ID, seed) as { id: number; name: string } | undefined;
-    if (!candidate) return; // nothing uncached at/after this seed this tick
-
-    await checkCandidateForVideo(candidate.id, candidate.name);
-  } catch {
-    // Best-effort background job -- swallow and try again next tick.
-  }
 }

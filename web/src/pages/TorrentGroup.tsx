@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, type ReleaseDetail, type TorrentEdition, type ReleaseExtras } from '../lib/api';
 import { Box } from '../components/Box';
@@ -36,23 +36,43 @@ function editionLabel(t: TorrentEdition): string {
   return `${bits.join(' ') || 'Remastered'} / ${t.media ?? 'Unknown'}`;
 }
 
-function EditionGroup({ label, editions }: { label: string; editions: TorrentEdition[] }) {
+// File lists are no longer part of the release payload (they were 58% of
+// the entire database and pushed one release's response to 3.7MB), so the
+// entry count isn't known until a visitor actually opens a toggle -- hence
+// the bare "View file list" until it loads. Every torrent in the archive
+// has a non-empty file list (checked: 0 of 2,678,446 are empty), so the
+// toggle always belongs there, exactly as the old `files.length > 0` gate
+// always resolved true.
+function EditionGroup({
+  label,
+  editions,
+  fileLists,
+  onOpenFileList,
+}: {
+  label: string;
+  editions: TorrentEdition[];
+  fileLists: Record<number, string> | null;
+  onOpenFileList: () => void;
+}) {
   return (
     <>
       <tr className="colhead_dark">
         <td colSpan={4}>&minus; {label}</td>
       </tr>
       {editions.map((t) => {
-        const files = parseFileList(t.file_list);
+        const raw = fileLists?.[t.id];
+        const files = raw === undefined ? null : parseFileList(raw);
         return (
           <tr className="group_torrent" key={t.id}>
             <td>
               &raquo; {t.format} / {t.encoding}
               {t.has_log ? ` / Log (${t.log_score}%)` : ''}
               {t.has_cue ? ' / Cue' : ''}
-              {files.length > 0 && (
-                <details>
-                  <summary>View file list ({files.length})</summary>
+              <details onToggle={(e) => e.currentTarget.open && onOpenFileList()}>
+                <summary>View file list{files ? ` (${files.length})` : ''}</summary>
+                {files === null ? (
+                  <p>Loading&hellip;</p>
+                ) : (
                   <table className="noborder file-list-table">
                     <tbody>
                       {files.map((f, i) => (
@@ -63,8 +83,8 @@ function EditionGroup({ label, editions }: { label: string; editions: TorrentEdi
                       ))}
                     </tbody>
                   </table>
-                </details>
-              )}
+                )}
+              </details>
             </td>
             <td className="center">{formatBytes(t.size)}</td>
           </tr>
@@ -83,6 +103,10 @@ export function TorrentGroup() {
   const [activeVideo, setActiveVideo] = useState(0);
   const [videoClicked, setVideoClicked] = useState(false);
   const [inDraft, setInDraft] = useState(false);
+  // One request covers every edition of the release, so opening a second
+  // toggle costs nothing. Kept as null until the first toggle is opened.
+  const [fileLists, setFileLists] = useState<Record<number, string> | null>(null);
+  const fileListsRequested = useRef(false);
 
   useEffect(() => {
     if (!id) return;
@@ -91,6 +115,8 @@ export function TorrentGroup() {
     setExtras(null);
     setActiveVideo(0);
     setVideoClicked(false);
+    setFileLists(null);
+    fileListsRequested.current = false;
     api.torrent(id).then((r) => {
       setRelease(r);
       setInDraft(isInDraft(r.id));
@@ -109,6 +135,18 @@ export function TorrentGroup() {
       .then(setExtras)
       .catch(() => {});
   }, [id]);
+
+  function loadFileLists() {
+    if (fileListsRequested.current || !id) return;
+    fileListsRequested.current = true;
+    api
+      .torrentFiles(id)
+      .then((r) => setFileLists(r.files))
+      .catch(() => {
+        // Let a later toggle retry rather than leaving it stuck on "Loading…".
+        fileListsRequested.current = false;
+      });
+  }
 
   if (!release) return <p className="center">Loading&hellip;</p>;
 
@@ -192,7 +230,13 @@ export function TorrentGroup() {
           <table className="torrent_table">
             <tbody>
               {[...groups.entries()].map(([key, editions]) => (
-                <EditionGroup key={key} label={editionLabel(editions[0])} editions={editions} />
+                <EditionGroup
+                  key={key}
+                  label={editionLabel(editions[0])}
+                  editions={editions}
+                  fileLists={fileLists}
+                  onOpenFileList={loadFileLists}
+                />
               ))}
             </tbody>
           </table>

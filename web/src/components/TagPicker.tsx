@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { api, type TagListItem } from '../lib/api';
 
+const SEARCH_DEBOUNCE_MS = 250;
+
 export interface PickedTag {
   id: number;
   name: string;
@@ -20,12 +22,17 @@ export function TagPicker({ selected, onChange }: { selected: PickedTag[]; onCha
       setSuggestions([]);
       return;
     }
+    // Without a delay this fires an FTS query per keystroke, and each one
+    // blocks the single JS thread the whole site shares.
     let cancelled = false;
-    api.tags(new URLSearchParams({ q, sort: 'uses' })).then((r) => {
-      if (!cancelled) setSuggestions(r.items);
-    });
+    const timer = setTimeout(() => {
+      api.tags(new URLSearchParams({ q, sort: 'uses' })).then((r) => {
+        if (!cancelled) setSuggestions(r.items);
+      });
+    }, SEARCH_DEBOUNCE_MS);
     return () => {
       cancelled = true;
+      clearTimeout(timer);
     };
   }, [q]);
 

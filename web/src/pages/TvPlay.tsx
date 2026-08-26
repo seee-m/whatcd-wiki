@@ -105,7 +105,11 @@ export function TvPlay() {
     if (!id) return;
     let cancelled = false;
     setNextError(null);
-    api.torrent(id).then((r) => {
+    // summary: this page shows the title, artists, label, catalogue
+    // number and tags -- never the editions table or the collage list. It
+    // also re-fetches on every "Next" and auto-advances forever once a
+    // video ends, so asking for the parts it renders is worth doing.
+    api.torrent(id, true).then((r) => {
       if (cancelled) return;
       setRelease(r);
       setInDraft(isInDraft(r.id));
@@ -295,8 +299,8 @@ export function TvPlay() {
             <Box title="Warning" collapsible={false}>
               <p>
                 <img src={warningGif} alt="" width={28} height={28} className="tv-warning-icon" />
-                Warning, your search has returned fewer than {pool.threshold} results. Surfing might take a long
-                time. Adjust your search parameters or browse <Link to="/tags">tags</Link> to see more.
+                Warning, your search has returned fewer than {pool.threshold} results, so this station will
+                repeat itself quickly. Adjust your search parameters or browse <Link to="/tags">tags</Link> to see more.
               </p>
             </Box>
           )}
