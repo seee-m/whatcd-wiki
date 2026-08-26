@@ -24,6 +24,25 @@ export function DiscogsVideoBox({
   onSelect: (i: number) => void;
   viewReleaseUrl?: string | null;
 }) {
+  // No videos to switch between -- there's nothing box-shaped to show, just
+  // the Discogs link itself. Reuses the box head's own markup/styling
+  // (no .body) so it still reads as a box heading, not a random link.
+  if (videos.length === 0) {
+    if (!viewReleaseUrl) return null;
+    return (
+      <div className="box">
+        <div className="head">
+          <span className="box-title">
+            Discogs{' '}
+            <a href={viewReleaseUrl} target="_blank" rel="noopener noreferrer">
+              - View Release
+            </a>
+          </span>
+        </div>
+      </div>
+    );
+  }
+
   const current = videos[activeVideo];
   const embedUrl = current && youtubeEmbedUrl(current.url, videoClicked);
 
@@ -31,7 +50,7 @@ export function DiscogsVideoBox({
     <Box
       title={
         <>
-          Youtube <span className="box-title-note">(Matching links via Discogs, may be inaccurate or incomplete)</span>
+          Youtube
           {viewReleaseUrl && (
             <>
               {' '}

@@ -16,3 +16,8 @@ whatcd-goodbye/
 
 # Agent working notes -- useful locally, not meant to be committed.
 AGENTS.md
+
+# Local-only maintenance script (scales the prod machine up/down via
+# flyctl and runs the Discogs bulk import against it) -- run by hand from
+# a terminal that's already `fly auth login`'d, not part of the app.
+api/import/update-discogs-videos-prod.sh

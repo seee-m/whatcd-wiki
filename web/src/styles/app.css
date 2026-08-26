@@ -680,15 +680,6 @@
   flex-shrink: 0;
 }
 
-/* Secondary caption inline in a box title (e.g. the Discogs-sourcing note
-   on the Youtube box) -- de-emphasized relative to the title itself
-   without the not-allowed cursor .inert carries. */
-.box-title-note {
-  font-weight: normal;
-  font-size: 0.85em;
-  opacity: 0.7;
-}
-
 /* Hidden by default -- only .sidebar boxes (Cover, Discogs, Artists,
    etc.) get the collapse toggle; main-column boxes (Torrents, Release
    info) don't. .head's own 4px padding (shiro.css) already insets this
