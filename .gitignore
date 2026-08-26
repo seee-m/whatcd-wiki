@@ -19,8 +19,10 @@ AGENTS.md
 
 # Local-only maintenance script (scales the prod machine up/down via
 # flyctl and runs the Discogs bulk import against it) -- run by hand from
-# a terminal that's already `fly auth login`'d, not part of the app.
+# a terminal that's already `fly auth login`'d, not part of the app --
+# plus its usage instructions, kept alongside it.
 api/import/update-discogs-videos-prod.sh
+api/import/update-discogs-videos-prod.txt
 
 # Personal workflow notes for Claude Code sessions on this machine, not
 # shared project documentation.
