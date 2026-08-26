@@ -124,8 +124,14 @@ export default async function listsRoutes(app: FastifyInstance) {
     const releaseIds = list.release_ids.split(',').map(Number);
     const placeholders = releaseIds.map(() => '?').join(',');
     const releaseRows = db
-      .prepare(`SELECT id, name, year FROM releases WHERE id IN (${placeholders})`)
-      .all(...(releaseIds as SqlParam[])) as { id: number; name: string; year: number }[];
+      .prepare(`SELECT id, name, year, record_label, catalogue_number FROM releases WHERE id IN (${placeholders})`)
+      .all(...(releaseIds as SqlParam[])) as {
+      id: number;
+      name: string;
+      year: number;
+      record_label: string | null;
+      catalogue_number: string | null;
+    }[];
     const releaseById = new Map(releaseRows.map((r) => [r.id, r]));
 
     const artistMap = new Map<number, { id: number; name: string }[]>();
@@ -142,6 +148,33 @@ export default async function listsRoutes(app: FastifyInstance) {
       artistMap.set(row.release_id, artists);
     }
 
+    // Batch-read whatever's already cached in release_extras -- populated
+    // either by a live per-release Discogs lookup (routes/torrents.ts) or
+    // the bulk dump import (import/import-discogs-videos.mjs). This never
+    // triggers a new Discogs API call itself, it just aggregates whatever
+    // videos are already on file for the releases in this list.
+    const extrasRows = db
+      .prepare(`SELECT release_id, discogs_url, videos FROM release_extras WHERE release_id IN (${placeholders})`)
+      .all(...(releaseIds as SqlParam[])) as { release_id: number; discogs_url: string | null; videos: string | null }[];
+    const extrasByRelease = new Map(extrasRows.map((r) => [r.release_id, r]));
+
+    const discogsVideos = releaseIds
+      .filter((rid) => releaseById.has(rid))
+      .flatMap((rid) => {
+        const extra = extrasByRelease.get(rid);
+        if (!extra?.videos) return [];
+        const release = releaseById.get(rid)!;
+        const artistNames = (artistMap.get(rid) ?? []).map((a) => a.name);
+        return (JSON.parse(extra.videos) as { url: string; title: string }[]).map((v) => ({
+          releaseId: rid,
+          releaseName: release.name,
+          artistNames,
+          discogsUrl: extra.discogs_url,
+          title: v.title,
+          url: v.url,
+        }));
+      });
+
     return {
       id: list.id,
       title: list.title,
@@ -153,8 +186,16 @@ export default async function listsRoutes(app: FastifyInstance) {
         .filter((rid) => releaseById.has(rid))
         .map((rid) => {
           const r = releaseById.get(rid)!;
-          return { id: r.id, name: r.name, year: r.year || null, artists: artistMap.get(r.id) ?? [] };
+          return {
+            id: r.id,
+            name: r.name,
+            year: r.year || null,
+            recordLabel: r.record_label,
+            catalogueNumber: r.catalogue_number,
+            artists: artistMap.get(r.id) ?? [],
+          };
         }),
+      discogsVideos,
     };
   });
 }

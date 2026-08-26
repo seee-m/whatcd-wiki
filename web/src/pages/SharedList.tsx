@@ -2,17 +2,64 @@ import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api, type SharedList as SharedListData } from '../lib/api';
 import { Box } from '../components/Box';
+import { youtubeEmbedUrl } from '../lib/youtube';
+
+const CSV_COLUMNS = ['Release', 'Artist', 'Label', 'Catalogue Number', 'Year', 'URL'];
+
+// Wraps every field in quotes and doubles any embedded quote, per RFC 4180
+// -- release/label names routinely contain commas, so bare comma-joining
+// would silently corrupt the file.
+function csvField(value: string): string {
+  return `"${value.replace(/"/g, '""')}"`;
+}
+
+function csvFromList(list: SharedListData): string {
+  const rows = list.releases.map((r) =>
+    [
+      r.name,
+      r.artists.map((a) => a.name).join('; '),
+      r.recordLabel ?? '',
+      r.catalogueNumber ?? '',
+      r.year != null ? String(r.year) : '',
+      `${window.location.origin}/torrents/${r.id}`,
+    ]
+      .map(csvField)
+      .join(','),
+  );
+  return [CSV_COLUMNS.map(csvField).join(','), ...rows].join('\r\n');
+}
+
+function downloadCsv(list: SharedListData) {
+  const slug = list.title
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  const blob = new Blob([csvFromList(list)], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `whatcd-wiki-list-${slug || list.id}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function SharedList() {
   const { id } = useParams();
   const [list, setList] = useState<SharedListData | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [activeVideo, setActiveVideo] = useState(0);
+  const [videoClicked, setVideoClicked] = useState(false);
 
   useEffect(() => {
     if (!id) return;
     setList(null);
     setNotFound(false);
+    setActiveVideo(0);
+    setVideoClicked(false);
     api.list(id).catch(() => {
       setNotFound(true);
       return null;
@@ -74,7 +121,48 @@ export function SharedList() {
               </tbody>
             </table>
           </Box>
-          <p className="action-row">
+          {list.discogsVideos.length > 0 &&
+            (() => {
+              const current = list.discogsVideos[activeVideo];
+              const embedUrl = current && youtubeEmbedUrl(current.url, videoClicked);
+              return (
+                <Box
+                  title={
+                    <>
+                      Youtube <span className="box-title-note">(Matching links via Discogs, may be inaccurate or incomplete)</span>
+                    </>
+                  }
+                >
+                  {embedUrl && (
+                    <div className="video-embed">
+                      <iframe
+                        src={embedUrl}
+                        title={current.title}
+                        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                        allowFullScreen
+                      />
+                    </div>
+                  )}
+                  <ul className="video-switcher">
+                    {list.discogsVideos.map((v, i) => (
+                      <li key={`${v.releaseId}-${v.url}`} className={i === activeVideo ? 'active' : undefined}>
+                        <a
+                          href="#"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            setActiveVideo(i);
+                            setVideoClicked(true);
+                          }}
+                        >
+                          {v.artistNames.length > 0 ? `${v.artistNames.join(', ')} – ${v.releaseName}` : v.releaseName}: {v.title}
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                </Box>
+              );
+            })()}
+          <p className="action-row list-actions">
             <button
               type="button"
               className="dice-button auto-width-button"
@@ -86,6 +174,9 @@ export function SharedList() {
               }}
             >
               {copied ? 'Copied!' : 'Copy link'}
+            </button>
+            <button type="button" className="dice-button auto-width-button" onClick={() => downloadCsv(list)}>
+              Export CSV
             </button>
           </p>
         </div>

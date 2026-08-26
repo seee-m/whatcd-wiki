@@ -1,23 +1,13 @@
 import type { FastifyInstance } from 'fastify';
-
-// Purely in-memory, old-school hit counter -- not analytics, so resetting
-// on redeploy/restart is a non-issue and this adds zero storage. A GET that
-// mutates is a deliberate simplicity tradeoff, same as a classic counter.
-let day = '';
-let count = 0;
-
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
-}
+import { db } from '../db.js';
+import { BUILD_NUMBER } from '../buildNumber.js';
 
 export default async function visitorsRoutes(app: FastifyInstance) {
-  app.get('/api/visitors-today', async () => {
-    const today = todayKey();
-    if (today !== day) {
-      day = today;
-      count = 0;
-    }
-    count += 1;
-    return { count };
+  // Also carries the build number -- the footer needs both on every page
+  // load, so riding along on the same request avoids a second round trip.
+  app.get('/api/visitor-count', async () => {
+    db.prepare('UPDATE site_visits SET count = count + 1 WHERE id = 1').run();
+    const row = db.prepare('SELECT count FROM site_visits WHERE id = 1').get() as { count: number };
+    return { count: row.count, build: BUILD_NUMBER };
   });
 }

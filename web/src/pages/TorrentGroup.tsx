@@ -81,6 +81,7 @@ export function TorrentGroup() {
   const [coverSource, setCoverSource] = useState<string | null>(null);
   const [extras, setExtras] = useState<ReleaseExtras | null>(null);
   const [activeVideo, setActiveVideo] = useState(0);
+  const [videoClicked, setVideoClicked] = useState(false);
   const [inDraft, setInDraft] = useState(false);
 
   useEffect(() => {
@@ -89,6 +90,7 @@ export function TorrentGroup() {
     setCoverSource(null);
     setExtras(null);
     setActiveVideo(0);
+    setVideoClicked(false);
     api.torrent(id).then((r) => {
       setRelease(r);
       setInDraft(isInDraft(r.id));
@@ -151,58 +153,56 @@ export function TorrentGroup() {
             }}
           />
         </Box>
-        {extras && (extras.videos.length > 0 || extras.discogsUrl) && (
-            <Box
-              title={
-                <>
-                  Discogs
-                  {extras.discogsUrl && (
-                    <>
-                      {' '}
-                      <a href={extras.discogsUrl} target="_blank" rel="noopener noreferrer">
-                        - View Release
+        {extras &&
+          extras.videos.length > 0 &&
+          (() => {
+            const current = extras.videos[activeVideo];
+            const embedUrl = current && youtubeEmbedUrl(current.url, videoClicked);
+            return (
+              <Box
+                title={
+                  <>
+                    Youtube <span className="box-title-note">(Matching links via Discogs, may be inaccurate or incomplete)</span>
+                    {extras.discogsUrl && (
+                      <>
+                        {' '}
+                        <a href={extras.discogsUrl} target="_blank" rel="noopener noreferrer">
+                          - View Release
+                        </a>
+                      </>
+                    )}
+                  </>
+                }
+              >
+                {embedUrl && (
+                  <div className="video-embed">
+                    <iframe
+                      src={embedUrl}
+                      title={current.title}
+                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                      allowFullScreen
+                    />
+                  </div>
+                )}
+                <ul className="video-switcher">
+                  {extras.videos.map((v, i) => (
+                    <li key={v.url} className={i === activeVideo ? 'active' : undefined}>
+                      <a
+                        href="#"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          setActiveVideo(i);
+                          setVideoClicked(true);
+                        }}
+                      >
+                        {v.title}
                       </a>
-                    </>
-                  )}
-                </>
-              }
-            >
-              {extras.videos.length > 0 &&
-                (() => {
-                  const current = extras.videos[activeVideo];
-                  const embedUrl = current && youtubeEmbedUrl(current.url);
-                  return (
-                    <>
-                      {embedUrl && (
-                        <div className="video-embed">
-                          <iframe
-                            src={embedUrl}
-                            title={current.title}
-                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-                            allowFullScreen
-                          />
-                        </div>
-                      )}
-                      <ul className="video-switcher">
-                        {extras.videos.map((v, i) => (
-                          <li key={v.url} className={i === activeVideo ? 'active' : undefined}>
-                            <a
-                              href="#"
-                              onClick={(e) => {
-                                e.preventDefault();
-                                setActiveVideo(i);
-                              }}
-                            >
-                              {v.title}
-                            </a>
-                          </li>
-                        ))}
-                      </ul>
-                    </>
-                  );
-                })()}
-            </Box>
-        )}
+                    </li>
+                  ))}
+                </ul>
+              </Box>
+            );
+          })()}
         <Box title="Artists">
           <ul className="nobullet">
             {release.artists.map((a) => (
@@ -267,14 +267,14 @@ export function TorrentGroup() {
             </div>
           )}
         </Box>
-        {(coverUrl || (extras && (extras.videos.length > 0 || extras.discogsUrl))) && (
+        {(coverUrl || (extras && extras.videos.length > 0)) && (
           <p className="external-disclaimer">
             {coverUrl && (
               <>
                 Cover art via {coverSource === 'musicbrainz' ? 'MusicBrainz' : coverSource === 'itunes' ? 'iTunes' : 'Discogs'}.{' '}
               </>
             )}
-            {extras && (extras.videos.length > 0 || extras.discogsUrl) && <>Videos/release link via Discogs. </>}
+            {extras && extras.videos.length > 0 && <>Videos/release link via Discogs. </>}
             Not part of the original archive, may be inaccurate.
           </p>
         )}

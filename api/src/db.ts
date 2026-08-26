@@ -59,6 +59,18 @@ db.exec(`
   )
 `);
 
+// Single-row lifetime hit counter. Lives in the DB (rather than in-memory,
+// like the old daily counter) specifically so it survives deploys/restarts
+// -- SQLITE_PATH points at a persistent Fly volume in prod, so this
+// naturally carries over between releases.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS site_visits (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    count INTEGER NOT NULL DEFAULT 0
+  )
+`);
+db.exec(`INSERT OR IGNORE INTO site_visits (id, count) VALUES (1, 0)`);
+
 export type SqlParam = string | number | bigint | null;
 
 export const CATEGORIES = [

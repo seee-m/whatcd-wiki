@@ -135,6 +135,15 @@ export interface WikiArticle {
   body_html: string;
 }
 
+export interface DiscogsListVideo {
+  releaseId: number;
+  releaseName: string;
+  artistNames: string[];
+  discogsUrl: string | null;
+  title: string;
+  url: string;
+}
+
 export interface SharedList {
   id: string;
   title: string;
@@ -142,7 +151,15 @@ export interface SharedList {
   categoryId: number;
   categoryName: string;
   createdAt: string;
-  releases: { id: number; name: string; year: number | null; artists: ArtistRef[] }[];
+  releases: {
+    id: number;
+    name: string;
+    year: number | null;
+    recordLabel: string | null;
+    catalogueNumber: string | null;
+    artists: ArtistRef[];
+  }[];
+  discogsVideos: DiscogsListVideo[];
 }
 
 export interface CreateListRequest {
@@ -206,5 +223,5 @@ export const api = {
   wikiArticle: (id: number | string) => get<WikiArticle>(`/api/wiki/${id}`),
   createList: (body: CreateListRequest) => post<{ id: string }>('/api/lists', body),
   list: (id: string) => get<SharedList>(`/api/lists/${id}`),
-  visitorsToday: () => get<{ count: number }>('/api/visitors-today'),
+  visitorCount: () => get<{ count: number; build: number }>('/api/visitor-count'),
 };

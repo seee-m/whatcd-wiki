@@ -5,9 +5,12 @@ export function youtubeVideoId(url: string): string | null {
   return match ? match[1] : null;
 }
 
-export function youtubeEmbedUrl(url: string): string | null {
+// autoplay is opt-in per call so a box's initial render (nobody clicked
+// anything yet) doesn't start blasting audio -- only pass true once the
+// user has actually clicked a track, so the switch reads as "pressing play".
+export function youtubeEmbedUrl(url: string, autoplay = false): string | null {
   const id = youtubeVideoId(url);
-  return id ? `https://www.youtube.com/embed/${id}` : null;
+  return id ? `https://www.youtube.com/embed/${id}${autoplay ? '?autoplay=1' : ''}` : null;
 }
 
 // Minimal surface of the YouTube IFrame Player API this app actually uses.
