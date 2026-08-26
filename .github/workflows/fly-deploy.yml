@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    # A push whose diff is confined to these paths can't change what's
+    # actually deployed (the Dockerfile only COPYs api/ and web/), so
+    # there's nothing worth a real Fly deploy/restart over.
+    paths-ignore:
+      - '.gitignore'
 
 jobs:
   deploy:
