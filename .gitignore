@@ -21,3 +21,7 @@ AGENTS.md
 # flyctl and runs the Discogs bulk import against it) -- run by hand from
 # a terminal that's already `fly auth login`'d, not part of the app.
 api/import/update-discogs-videos-prod.sh
+
+# Personal workflow notes for Claude Code sessions on this machine, not
+# shared project documentation.
+CLAUDE.md
