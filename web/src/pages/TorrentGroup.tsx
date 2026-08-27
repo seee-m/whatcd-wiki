@@ -100,6 +100,7 @@ export function TorrentGroup() {
   const [coverUrl, setCoverUrl] = useState<string | null>(null);
   const [coverSource, setCoverSource] = useState<string | null>(null);
   const [extras, setExtras] = useState<ReleaseExtras | null>(null);
+  const [refreshingExtras, setRefreshingExtras] = useState(false);
   const [activeVideo, setActiveVideo] = useState(0);
   const [videoClicked, setVideoClicked] = useState(false);
   const [inDraft, setInDraft] = useState(false);
@@ -200,6 +201,15 @@ export function TorrentGroup() {
             onSelect={(i) => {
               setActiveVideo(i);
               setVideoClicked(true);
+            }}
+            refreshing={refreshingExtras}
+            onRefresh={() => {
+              if (!id) return;
+              setRefreshingExtras(true);
+              api
+                .torrentExtrasRefresh(id)
+                .then(setExtras)
+                .finally(() => setRefreshingExtras(false));
             }}
           />
         )}

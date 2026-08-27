@@ -11,18 +11,42 @@ export interface VideoSwitcherItem {
 // Shared by the release page (one release's own videos) and the shared-list
 // page (videos aggregated across every release in the list) -- same
 // one-iframe-at-a-time switcher, just fed a differently-labeled item list.
+function RefreshLink({ onRefresh, refreshing }: { onRefresh: () => void; refreshing: boolean }) {
+  return (
+    <a
+      href="#"
+      title="Re-check Discogs for a video added after this was last looked up"
+      aria-label="Refresh"
+      onClick={(e) => {
+        e.preventDefault();
+        if (!refreshing) onRefresh();
+      }}
+    >
+      {' '}
+      {refreshing ? '…' : '↺'}
+    </a>
+  );
+}
+
 export function DiscogsVideoBox({
   videos,
   activeVideo,
   videoClicked,
   onSelect,
   viewReleaseUrl,
+  onRefresh,
+  refreshing,
 }: {
   videos: VideoSwitcherItem[];
   activeVideo: number;
   videoClicked: boolean;
   onSelect: (i: number) => void;
   viewReleaseUrl?: string | null;
+  // Omitted on the shared-list box, which aggregates videos across many
+  // releases rather than showing one release's own extras -- there's no
+  // single row to refresh there.
+  onRefresh?: () => void;
+  refreshing?: boolean;
 }) {
   // No videos to switch between -- there's nothing box-shaped to show, just
   // the Discogs link itself. Reuses the box head's own markup/styling
@@ -37,6 +61,7 @@ export function DiscogsVideoBox({
             <a href={viewReleaseUrl} target="_blank" rel="noopener noreferrer">
               - View Release
             </a>
+            {onRefresh && <RefreshLink onRefresh={onRefresh} refreshing={!!refreshing} />}
           </span>
         </div>
       </div>
@@ -57,6 +82,7 @@ export function DiscogsVideoBox({
               <a href={viewReleaseUrl} target="_blank" rel="noopener noreferrer">
                 - View Release
               </a>
+              {onRefresh && <RefreshLink onRefresh={onRefresh} refreshing={!!refreshing} />}
             </>
           )}
         </>

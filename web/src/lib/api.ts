@@ -200,6 +200,11 @@ export const api = {
   tvReportDeadVideo: (id: number | string, url: string) => post<{ removed: boolean }>(`/api/tv/${id}/video-dead`, { url }),
   torrentCover: (id: number | string) => get<{ url: string | null; source?: string }>(`/api/torrents/${id}/cover`),
   torrentExtras: (id: number | string) => get<ReleaseExtras>(`/api/torrents/${id}/extras`),
+  // On-demand only (a "Refresh" link next to the Discogs box) -- re-fetches
+  // from Discogs live and overwrites the cached row, for a visitor who just
+  // added a video there and wants it to show up without waiting on the
+  // periodic bulk importer.
+  torrentExtrasRefresh: (id: number | string) => post<ReleaseExtras>(`/api/torrents/${id}/extras/refresh`, {}),
   artistSearch: (q: string) => get<{ items: ArtistRef[] }>(`/api/artists/search?q=${encodeURIComponent(q)}`),
   artist: (id: number | string) => get<ArtistDetail>(`/api/artists/${id}`),
   artistInfo: (id: number | string) => get<ArtistInfo>(`/api/artists/${id}/info`),

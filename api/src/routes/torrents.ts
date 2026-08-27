@@ -329,19 +329,10 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     return result ? { url: result.url, source: result.source } : { url: null };
   });
 
-  app.get('/api/torrents/:id/extras', async (req, reply) => {
-    const id = Number((req.params as { id: string }).id);
-
-    const cached = db.prepare('SELECT discogs_url, videos FROM release_extras WHERE release_id = ?').get(id) as
-      | { discogs_url: string | null; videos: string | null }
-      | undefined;
-    if (cached) {
-      return {
-        discogsUrl: cached.discogs_url,
-        videos: cached.videos ? (JSON.parse(cached.videos) as { url: string; title: string }[]) : [],
-      };
-    }
-
+  // Live-fetches Discogs extras for a release and caches the result,
+  // unconditionally -- callers decide whether a cache hit should skip this
+  // (the plain GET route below) or force it (the refresh route).
+  async function fetchAndCacheExtras(id: number, reply: { code: (n: number) => void }) {
     const release = db.prepare('SELECT name, category_id FROM releases WHERE id = ?').get(id) as
       | { name: string; category_id: number }
       | undefined;
@@ -366,5 +357,33 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     ).run(id, result?.discogsUrl ?? null, result ? JSON.stringify(result.videos) : null, new Date().toISOString());
 
     return { discogsUrl: result?.discogsUrl ?? null, videos: result?.videos ?? [] };
+  }
+
+  app.get('/api/torrents/:id/extras', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+
+    const cached = db.prepare('SELECT discogs_url, videos FROM release_extras WHERE release_id = ?').get(id) as
+      | { discogs_url: string | null; videos: string | null }
+      | undefined;
+    if (cached) {
+      return {
+        discogsUrl: cached.discogs_url,
+        videos: cached.videos ? (JSON.parse(cached.videos) as { url: string; title: string }[]) : [],
+      };
+    }
+
+    return fetchAndCacheExtras(id, reply);
+  });
+
+  // Manual re-check: a visitor who just added a video on Discogs has no
+  // other way to see it here, since the GET route above caches permanently
+  // (see CLAUDE.md's "DB-first, always" external-lookup rule -- correct for
+  // a closed, unchanging whatcd catalogue, but Discogs' own side keeps
+  // changing). On-demand only, never automatic, so it can't reintroduce the
+  // kind of continuous live-lookup traffic that what.tv's old pre-warmer
+  // was removed for.
+  app.post('/api/torrents/:id/extras/refresh', async (req, reply) => {
+    const id = Number((req.params as { id: string }).id);
+    return fetchAndCacheExtras(id, reply);
   });
 }
