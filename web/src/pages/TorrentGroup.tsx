@@ -192,7 +192,10 @@ export function TorrentGroup() {
             }}
           />
         </Box>
-        {extras && (extras.videos.length > 0 || extras.discogsUrl) && (
+        {/* categoryId === 1 is music (see MUSIC_CATEGORY_ID in api/src/routes/torrents.ts) --
+            shown even with an empty extras result so the Refresh link stays reachable;
+            only truly absent for non-music releases, which the backend never even tries. */}
+        {extras && release.categoryId === 1 && (
           <DiscogsVideoBox
             videos={extras.videos.map((v) => ({ key: v.url, label: v.title, title: v.title, url: v.url }))}
             activeVideo={activeVideo}

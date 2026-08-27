@@ -51,16 +51,28 @@ export function DiscogsVideoBox({
   // No videos to switch between -- there's nothing box-shaped to show, just
   // the Discogs link itself. Reuses the box head's own markup/styling
   // (no .body) so it still reads as a box heading, not a random link.
+  //
+  // Still rendered with no viewReleaseUrl as long as onRefresh exists: a
+  // release with no verified Discogs match is exactly the one where a
+  // manual recheck matters most (Discogs added something since the last
+  // look, or the last look predates the match-verification fix) -- hiding
+  // the box entirely would take away the only way to trigger one.
   if (videos.length === 0) {
-    if (!viewReleaseUrl) return null;
+    if (!viewReleaseUrl && !onRefresh) return null;
     return (
       <div className="box">
         <div className="head">
           <span className="box-title">
-            Discogs{' '}
-            <a href={viewReleaseUrl} target="_blank" rel="noopener noreferrer">
-              - View Release
-            </a>
+            Discogs
+            {viewReleaseUrl && (
+              <>
+                {' '}
+                <a href={viewReleaseUrl} target="_blank" rel="noopener noreferrer">
+                  - View Release
+                </a>
+              </>
+            )}
+            {!viewReleaseUrl && ' - No match found'}
             {onRefresh && <RefreshLink onRefresh={onRefresh} refreshing={!!refreshing} />}
           </span>
         </div>

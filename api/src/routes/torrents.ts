@@ -386,6 +386,11 @@ export default async function torrentsRoutes(app: FastifyInstance) {
     return fetchAndCacheExtras(id, reply);
   });
 
+  // Below this, a repeat refresh on the same release within the cooldown
+  // is a no-op against Discogs -- nothing there could plausibly have
+  // changed in that window, so it isn't worth a turn in the shared queue.
+  const REFRESH_COOLDOWN_MS = 5 * 60 * 1000;
+
   // Manual re-check: a visitor who just added a video on Discogs has no
   // other way to see it here, since the GET route above caches permanently
   // (see CLAUDE.md's "DB-first, always" external-lookup rule -- correct for
@@ -393,8 +398,27 @@ export default async function torrentsRoutes(app: FastifyInstance) {
   // changing). On-demand only, never automatic, so it can't reintroduce the
   // kind of continuous live-lookup traffic that what.tv's old pre-warmer
   // was removed for.
+  //
+  // Unlike the GET route, this is an unauthenticated action anyone can fire
+  // for any release id at will -- and every hit funnels through the single
+  // process-wide Discogs throttle queue (discogsThrottle.ts), so a burst of
+  // refreshes (mashed clicks, a bot) would back up every other live Discogs
+  // lookup sitewide, not just cost this one request time. The cooldown
+  // below bounds that: repeat refreshes on the same release within it are
+  // answered from cache instead of taking another turn in the queue.
   app.post('/api/torrents/:id/extras/refresh', async (req, reply) => {
     const id = Number((req.params as { id: string }).id);
+
+    const cached = db.prepare('SELECT discogs_url, videos, fetched_at FROM release_extras WHERE release_id = ?').get(id) as
+      | { discogs_url: string | null; videos: string | null; fetched_at: string | null }
+      | undefined;
+    if (cached?.fetched_at && Date.now() - new Date(cached.fetched_at).getTime() < REFRESH_COOLDOWN_MS) {
+      return {
+        discogsUrl: cached.discogs_url,
+        videos: cached.videos ? (JSON.parse(cached.videos) as { url: string; title: string }[]) : [],
+      };
+    }
+
     return fetchAndCacheExtras(id, reply);
   });
 }
