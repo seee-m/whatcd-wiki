@@ -208,7 +208,23 @@ export function TorrentGroup() {
               setRefreshingExtras(true);
               api
                 .torrentExtrasRefresh(id)
-                .then(setExtras)
+                .then((r) => {
+                  setExtras(r);
+                  // The backend clears a Discogs-sourced cover the moment
+                  // it can't verify a real match for this release (same
+                  // blind-search flaw, see routes/torrents.ts) -- pull the
+                  // corrected value so it updates here too, not just on a
+                  // later page load.
+                  if (!r.discogsUrl && coverSource === 'discogs') {
+                    api
+                      .torrentCover(id)
+                      .then((c) => {
+                        setCoverUrl(c.url);
+                        setCoverSource(c.source ?? null);
+                      })
+                      .catch(() => {});
+                  }
+                })
                 .finally(() => setRefreshingExtras(false));
             }}
           />

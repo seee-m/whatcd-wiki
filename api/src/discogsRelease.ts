@@ -9,6 +9,7 @@
 
 import { APP_UA, fetchWithTimeout } from './httpUtil.js';
 import { throttleDiscogs } from './discogsThrottle.js';
+import { resembles } from './discogsMatch.js';
 
 export interface DiscogsExtras {
   discogsUrl: string;
@@ -23,23 +24,8 @@ export interface DiscogsExtras {
 // lighter check than import-discogs-videos.mjs's full MATCH_RULES ladder --
 // this is a live, per-request lookup against whatever Discogs' search
 // returns, not an offline bulk match against a downloaded index -- but it's
-// enough to reject a hit that's obviously a different record. Compacted
-// (whitespace stripped, not just collapsed) so punctuation-only spelling
-// differences ("Run-D.M.C." vs "RUN DMC") still resemble each other.
-function compact(s: string): string {
-  return s
-    .normalize('NFKD')
-    .replace(/[̀-ͯ]/g, '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '');
-}
-
-function resembles(query: string, candidate: string): boolean {
-  const a = compact(query);
-  const b = compact(candidate);
-  return !!a && !!b && (a === b || a.includes(b) || b.includes(a));
-}
-
+// enough to reject a hit that's obviously a different record.
+//
 // Checked against the search result's own release detail (title + artists),
 // which the caller fetches anyway to read videos -- no extra Discogs call
 // needed to verify a candidate.

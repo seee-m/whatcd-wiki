@@ -356,6 +356,17 @@ export default async function torrentsRoutes(app: FastifyInstance) {
       'INSERT OR REPLACE INTO release_extras (release_id, discogs_url, videos, fetched_at) VALUES (?, ?, ?, ?)',
     ).run(id, result?.discogsUrl ?? null, result ? JSON.stringify(result.videos) : null, new Date().toISOString());
 
+    // fetchDiscogsExtras coming back empty means it couldn't verify any of
+    // Discogs' search results as the actual release (see discogsRelease.ts)
+    // -- the same blind "take the first search hit" flaw that bug fixed
+    // also exists in cover.ts's tryDiscogs, uncorrected, so a cover cached
+    // from Discogs for this release was very likely pulled from that same
+    // wrong record. Clearing it lets the next /cover lookup try again
+    // (iTunes first) instead of keeping a probably-wrong image forever.
+    if (!result) {
+      db.prepare("DELETE FROM release_covers WHERE release_id = ? AND source = 'discogs'").run(id);
+    }
+
     return { discogsUrl: result?.discogsUrl ?? null, videos: result?.videos ?? [] };
   }
 

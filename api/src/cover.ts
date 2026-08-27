@@ -9,6 +9,7 @@
 
 import { APP_UA, fetchWithTimeout } from './httpUtil.js';
 import { throttleDiscogs } from './discogsThrottle.js';
+import { resembles } from './discogsMatch.js';
 
 // MusicBrainz asks for at most ~1 req/sec from unauthenticated clients.
 // A simple serialized delay is enough for a personal app's traffic.
@@ -43,10 +44,22 @@ async function tryDiscogs(artist: string, title: string): Promise<CoverResult | 
   const url = `https://api.discogs.com/database/search?q=${encodeURIComponent(`${artist} ${title}`)}&type=release&token=${token}`;
   const res = await throttleDiscogs(() => fetchWithTimeout(url, { headers: { 'User-Agent': APP_UA } }));
   if (!res.ok) return null;
-  const data = (await res.json()) as { results?: { cover_image?: string; thumb?: string }[] };
-  const art = data.results?.[0]?.cover_image || data.results?.[0]?.thumb;
-  if (!art) return null;
-  return { url: art, source: 'discogs' };
+  const data = (await res.json()) as { results?: { id?: number; title?: string; cover_image?: string; thumb?: string }[] };
+
+  // Same blind-search flaw fixed in discogsRelease.ts: Discogs' relevance
+  // ranking has put a completely unrelated release first (see that file's
+  // comment). The search endpoint's own `title` field comes back as
+  // "Artist - Release Title" -- enough to verify without a second (detail)
+  // API call, unlike the extras path which already needs the detail call
+  // for videos. Tries the next-ranked result when the top one doesn't
+  // resemble the query, capped at 5 for the same reason as discogsRelease.ts.
+  for (const result of (data.results ?? []).slice(0, 5)) {
+    const art = result.cover_image || result.thumb;
+    if (!art || !result.title) continue;
+    if (!resembles(artist, result.title) || !resembles(title, result.title)) continue;
+    return { url: art, source: 'discogs' };
+  }
+  return null;
 }
 
 async function tryMusicBrainz(artist: string, title: string): Promise<CoverResult | null> {
