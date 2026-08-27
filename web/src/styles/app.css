@@ -46,20 +46,41 @@
 
 #footer span.inert {
   font-size: 0.9em;
+  display: inline-block;
+  text-wrap: pretty;
 }
 
-/* shiro.css's own #footer padding is `1em 0` -- with body's margin/padding
-   zeroed globally, that 1em is the *only* space below the footer text and
-   the viewport edge on short pages. Bumped just the bottom for breathing
-   room. */
+/* margin-top: 0 overrides shiro.css's own #footer margin-top: 40px --
+   that rule was cascading in on top of whatever padding was set here
+   (app.css only ever touched the padding side of shiro's `margin-top:
+   40px; padding: 1em 0` #footer rule), silently adding 40px regardless.
+   The visible gap above the visitor count is this padding-top *plus*
+   #content's own padding-bottom (the two stack, since #footer directly
+   follows #content in the DOM on every page) -- both are 16px, matching
+   #content's own padding-top, so the gap above (32px) equals the
+   padding-bottom below. Kept in px rather than em so the values stay
+   numerically comparable regardless of inherited font-size. */
 #footer {
-  padding-bottom: 2em;
+  margin-top: 0;
+  padding-top: 16px;
+  padding-bottom: 32px;
+}
+
+/* Constrain the footer text to the same column width as the homepage's
+   own content (.main_column, shiro.css: width: 590px) rather than the
+   full #wrapper.thin page width, so it reads as one more block in that
+   column instead of a wide banner underneath it. */
+.footer-content {
+  max-width: 590px;
+  margin: 0 auto;
+  padding: 0 15px;
+  box-sizing: border-box;
 }
 
 .visitor-count {
   display: block;
   font-size: 0.9em;
-  margin-bottom: 0.3em;
+  margin-bottom: 1em;
 }
 
 /* shiro.css lays #userinfo/#logo/#menu/#searchbars out with
@@ -316,7 +337,7 @@
   position: static;
   top: auto;
   padding-top: 16px;
-  padding-bottom: 30px;
+  padding-bottom: 16px;
 }
 
 #wrapper.thin {
