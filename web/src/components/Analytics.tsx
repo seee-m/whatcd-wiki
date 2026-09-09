@@ -15,7 +15,7 @@ export function Analytics() {
   const location = useLocation();
 
   useEffect(() => {
-    window.goatcounter?.count({ path: location.pathname + location.search });
+    window.goatcounter?.count?.({ path: location.pathname + location.search });
   }, [location.pathname, location.search]);
 
   return null;
