@@ -148,10 +148,13 @@ export function SharedList() {
               type="button"
               className="dice-button auto-width-button"
               onClick={() => {
-                navigator.clipboard.writeText(window.location.href).then(() => {
-                  setCopied(true);
-                  setTimeout(() => setCopied(false), 2000);
-                });
+                navigator.clipboard
+                  ?.writeText(window.location.href)
+                  .then(() => {
+                    setCopied(true);
+                    setTimeout(() => setCopied(false), 2000);
+                  })
+                  .catch(() => {});
               }}
             >
               {copied ? 'Copied!' : 'Copy link'}
