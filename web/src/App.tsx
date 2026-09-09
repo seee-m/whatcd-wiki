@@ -1,4 +1,5 @@
 import { Routes, Route } from 'react-router-dom';
+import { Analytics } from './components/Analytics';
 import { Layout } from './components/Layout';
 import { Home } from './pages/Home';
 import { TorrentsBrowse } from './pages/TorrentsBrowse';
@@ -18,6 +19,7 @@ import { TvPlay } from './pages/TvPlay';
 export function App() {
   return (
     <Layout>
+      <Analytics />
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/torrents" element={<TorrentsBrowse />} />

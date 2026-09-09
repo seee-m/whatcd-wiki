@@ -218,5 +218,5 @@ export const api = {
   wikiArticle: (id: number | string) => get<WikiArticle>(`/api/wiki/${id}`),
   createList: (body: CreateListRequest) => post<{ id: string }>('/api/lists', body),
   list: (id: string) => get<SharedList>(`/api/lists/${id}`),
-  visitorCount: () => get<{ count: number; build: number }>('/api/visitor-count'),
+  buildNumber: () => get<{ build: number }>('/api/build'),
 };

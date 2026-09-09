@@ -14,14 +14,14 @@ const DB_PATH = process.env.SQLITE_PATH || path.join(os.homedir(), 'Library/Appl
 export const db = new DatabaseSync(DB_PATH);
 
 // import.mjs finishes with `PRAGMA journal_mode = DELETE` and nothing set
-// it back, so the served database ran in rollback-journal mode: the
-// lifetime-visitor UPDATE (routes/visitors.ts) fires once per page load,
-// and in that mode each one takes an exclusive lock and fsyncs, blocking
-// every concurrent reader on a single-threaded server. WAL lets that write
+// it back, so the served database ran in rollback-journal mode: any write
+// (e.g. the release_covers/artist_info/release_extras cache-back writes
+// below) takes an exclusive lock and fsyncs in that mode, blocking every
+// concurrent reader on a single-threaded server. WAL lets that write
 // proceed alongside reads. NORMAL trades an fsync per commit for one per
-// checkpoint -- the durability at risk is a hit counter and best-effort
-// external-lookup caches, all re-derivable, and nothing here is a
-// transaction anyone would miss after a power loss.
+// checkpoint -- the durability at risk is best-effort external-lookup
+// caches, all re-derivable, and nothing here is a transaction anyone would
+// miss after a power loss.
 //
 // The Dropbox/SQLITE_BUSY trouble noted in the import script was about a
 // database file living *inside* a sync folder; both the dev default above
@@ -75,18 +75,6 @@ db.exec(`
     created_at TEXT NOT NULL
   )
 `);
-
-// Single-row lifetime hit counter. Lives in the DB (rather than in-memory,
-// like the old daily counter) specifically so it survives deploys/restarts
-// -- SQLITE_PATH points at a persistent Fly volume in prod, so this
-// naturally carries over between releases.
-db.exec(`
-  CREATE TABLE IF NOT EXISTS site_visits (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    count INTEGER NOT NULL DEFAULT 0
-  )
-`);
-db.exec(`INSERT OR IGNORE INTO site_visits (id, count) VALUES (1, 0)`);
 
 export type SqlParam = string | number | bigint | null;
 

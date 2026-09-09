@@ -77,9 +77,17 @@
   box-sizing: border-box;
 }
 
-.visitor-count {
-  display: block;
-  font-size: 0.9em;
+/* Same box height/padding as a .box's own .head (shiro.css: padding 4px,
+   border), but background/text match #footer itself (body's #DDD
+   background-color -- #footer sets none of its own -- and .inert's dimmed
+   #444) rather than GoatCounter's own purple/white counter image. */
+.site-counter {
+  display: inline-block;
+  border: 1px solid #BBB;
+  background: #DDD;
+  color: #444;
+  opacity: 0.45;
+  padding: 4px;
   margin-bottom: 1em;
 }
 

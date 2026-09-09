@@ -1,6 +1,7 @@
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Box } from '../components/Box';
-import wcdLogo from '../assets/wcd-logo.png';
+import { api } from '../lib/api';
 import newGif from '../assets/new.gif';
 
 const FURTHER_READING = [
@@ -31,6 +32,14 @@ const FURTHER_READING = [
 ];
 
 export function Home() {
+  const [build, setBuild] = useState<number | null>(null);
+
+  useEffect(() => {
+    api.buildNumber().then((r) => {
+      setBuild(r.build);
+    }).catch(() => {});
+  }, []);
+
   return (
     <div className="main_column" style={{ margin: '20px auto', float: 'none' }}>
       <Box title="what.cd wiki">
@@ -93,13 +102,22 @@ export function Home() {
 
       <Box title="About">
         <p>
-          Project built and maintained by{' '}
+          This is whatcdwiki build {build ?? '…'}, project created and maintained by{' '}
           <a href="https://www.c-m.work" target="_blank" rel="noopener noreferrer">
             www.c-m.work
           </a>{' '}
-          &mdash; send emails to <a href="mailto:what@c-m.work">what@c-m.work</a>
+          &mdash; Send emails to <a href="mailto:what@c-m.work">what@c-m.work</a>
         </p>
-        <img src={wcdLogo} alt="WCD - Music on the Internet" width={128} />
+        <p className="inert">
+          whatcd.wiki is a read-only archive. This site is not part of what.cd. This site has no
+          connection to the labels, groups, or artists named here. Cover art, YouTube links, and
+          artist photos supplied via the Discogs, iTunes, MusicBrainz, and Wikipedia APIs. No
+          media is stored on this server. Artist bios cached via Wikipedia. This site is built
+          from the open-source what.cd &ldquo;goodbye&rdquo; release &ndash; available on
+          archive.org. This site&apos;s source code is dedicated to the public domain (CC0).
+          Content and data displayed from the sources credited above remain under their
+          respective terms.
+        </p>
       </Box>
     </div>
   );

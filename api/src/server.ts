@@ -11,7 +11,7 @@ import collagesRoutes from './routes/collages.js';
 import tagsRoutes from './routes/tags.js';
 import wikiRoutes from './routes/wiki.js';
 import listsRoutes from './routes/lists.js';
-import visitorsRoutes from './routes/visitors.js';
+import buildRoutes from './routes/build.js';
 import tvRoutes from './routes/tv.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -37,7 +37,7 @@ await app.register(collagesRoutes);
 await app.register(tagsRoutes);
 await app.register(wikiRoutes);
 await app.register(listsRoutes);
-await app.register(visitorsRoutes);
+await app.register(buildRoutes);
 await app.register(tvRoutes);
 
 // In production this process also serves the built React app (web/dist),

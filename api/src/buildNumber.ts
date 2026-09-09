@@ -1,3 +1,3 @@
 // Bumped by 1 on every code change made to this repo -- see CLAUDE.md.
-// Shown in the site footer alongside the lifetime visitor count.
-export const BUILD_NUMBER = 27;
+// Shown in the site footer.
+export const BUILD_NUMBER = 28;
