@@ -10,8 +10,8 @@ const MAX_DESCRIPTION_LENGTH = 1000;
 // a single always-on server (no distributed state needed), and cheap
 // insurance against the table growing from casual abuse/bots without
 // pulling in a dependency for it. req.ip is the real client address via
-// trustProxy (see server.ts) -- not a fly-client-ip header, which nothing
-// strips once the app isn't behind Fly, so any client could set it.
+// trustProxy (see server.ts) -- never a client-supplied header read
+// directly, which anyone could set to dodge the limit.
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX = 20;
 const createTimestamps = new Map<string, number[]>();

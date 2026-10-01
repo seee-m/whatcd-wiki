@@ -22,8 +22,8 @@ if (fs.existsSync(envPath)) process.loadEnvFile(envPath);
 
 const PORT = Number(process.env.PORT) || 4000;
 
-// The process only ever sits behind one reverse proxy (Caddy on Hetzner,
-// Fly's proxy before that), so trust exactly one hop: req.ip is then the
+// The process only ever sits behind one reverse proxy (Caddy, see
+// deploy/Caddyfile), so trust exactly one hop: req.ip is then the
 // last X-Forwarded-For entry, the one that proxy appended itself. Trusting
 // more than that would hand req.ip to whatever a client puts in the header.
 //
@@ -47,8 +47,8 @@ const app = Fastify({
   },
 });
 
-// Nothing was compressing anything: Fly's proxy doesn't, and Fastify
-// doesn't by default, so every JSON response and the whole JS bundle went
+// Compression happens here rather than in Caddy, so dev (no proxy) and
+// prod behave the same. Fastify doesn't compress by default, so every JSON response and the whole JS bundle went
 // out raw. Measured: bundle 244KB -> 84KB, stylesheet 24KB -> 6KB, a
 // browse page's JSON 4.0KB -> 1.0KB, a large collage 597KB -> 166KB.
 // Registered before the routes so it covers the API and web/dist alike.
@@ -95,7 +95,8 @@ if (fs.existsSync(webDist)) {
   });
 }
 
-// Fly stops machines with SIGTERM on every deploy. The database is
+// `docker compose up -d` stops the old container with SIGTERM on every
+// deploy (deploy/docker-compose.yml gives it 30s). The database is
 // crash-safe without this -- SQLite replays the WAL on next open -- but
 // folding it back into the main file first means a deploy never starts by
 // replaying one. db.close() alone does NOT do this: checked, and it leaves

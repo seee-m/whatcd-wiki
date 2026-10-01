@@ -14,10 +14,9 @@ whatcd-goodbye/
 # Claude Code local (per-machine) settings, not shared project config.
 .claude/settings.local.json
 
-# Local-only maintenance script (scales the prod machine up/down via
-# flyctl and runs the Discogs bulk import against it) -- run by hand from
-# a terminal that's already `fly auth login`'d, not part of the app --
-# plus its usage instructions, kept alongside it.
+# Local-only maintenance script that runs the Discogs bulk import against
+# production, plus its usage instructions, kept alongside it. Not part of
+# the app. (Still written for the old Fly host; see CLAUDE.md.)
 api/import/update-discogs-videos-prod.sh
 api/import/update-discogs-videos-prod.txt
 
