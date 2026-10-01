@@ -1,0 +1,34 @@
+# Production stack on the Hetzner server, in /opt/whatcd-wiki alongside
+# Caddyfile. The app image is built by .github/workflows/deploy.yml and
+# pushed to GHCR; that workflow copies this file up and runs
+# `docker compose pull && docker compose up -d` on every push to main.
+services:
+  app:
+    image: ghcr.io/seee-m/whatcd-wiki:latest
+    restart: unless-stopped
+    environment:
+      PORT: "4000"
+      SQLITE_PATH: /data/whatcd.sqlite
+    volumes:
+      - /srv/whatcd-data:/data
+    # server.ts checkpoints the WAL on SIGTERM before exiting; give it
+    # longer than Docker's 10s default so a deploy never cuts that short.
+    stop_grace_period: 30s
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - app
+
+volumes:
+  caddy_data:
+  caddy_config:

@@ -1,0 +1,63 @@
+name: Deploy to Hetzner
+
+on:
+  push:
+    branches:
+      - main
+    # A push whose diff is confined to these paths can't change what's
+    # actually deployed (the Dockerfile only COPYs api/ and web/).
+    paths-ignore:
+      - '.gitignore'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    concurrency: deploy-group
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/seee-m/whatcd-wiki:latest
+            ghcr.io/seee-m/whatcd-wiki:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Copy compose files to server
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          source: deploy/docker-compose.yml,deploy/Caddyfile
+          target: /opt/whatcd-wiki
+          strip_components: 1
+
+      - name: Pull and restart
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: deploy
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            cd /opt/whatcd-wiki
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+            docker compose pull app
+            docker compose up -d
+            docker image prune -f

@@ -1,0 +1,27 @@
+#cloud-config
+# Paste into Hetzner's "Cloud config" box when creating the server
+# (Ubuntu 26.04). Replace the ssh key line with the *public* half of the
+# key whose private half goes in the DEPLOY_SSH_KEY GitHub secret, and add
+# your own key too if you want to SSH in as `deploy` yourself.
+users:
+  - name: deploy
+    groups: [sudo, docker]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    ssh_authorized_keys:
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMmhQpB+Zb/CAkj9m3ddK57bUzAZus/CcsdkmohVXS9E github-actions-deploy
+      - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIL4Lh/ueMbmrt9D9ctMV2kVsks1vxSpDgfNKK9vf+HMp connor-mac
+
+ssh_pwauth: false
+package_update: true
+packages: [ca-certificates, curl, sqlite3, ufw]
+
+runcmd:
+  - curl -fsSL https://get.docker.com | sh
+  - usermod -aG docker deploy
+  - mkdir -p /opt/whatcd-wiki /srv/whatcd-data
+  - chown deploy:deploy /opt/whatcd-wiki /srv/whatcd-data
+  - ufw allow OpenSSH
+  - ufw allow 80/tcp
+  - ufw allow 443
+  - ufw --force enable
