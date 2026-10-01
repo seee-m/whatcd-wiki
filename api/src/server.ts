@@ -5,6 +5,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { db } from './db.js';
+import { AI_BOT_PATTERN } from './aiBots.js';
 import torrentsRoutes from './routes/torrents.js';
 import artistsRoutes from './routes/artists.js';
 import collagesRoutes from './routes/collages.js';
@@ -45,6 +46,15 @@ const app = Fastify({
       },
     },
   },
+});
+
+// AI crawlers get a 403 before anything else runs -- no route, no query,
+// no compression. robots.txt stays reachable so the ones that honour it
+// can read why. The list and what's deliberately left off it: aiBots.ts.
+app.addHook('onRequest', async (req, reply) => {
+  if (req.url !== '/robots.txt' && AI_BOT_PATTERN.test(req.headers['user-agent'] ?? '')) {
+    return reply.code(403).type('text/plain').send('AI crawlers are not permitted on this site. See /robots.txt.\n');
+  }
 });
 
 // Compression happens here rather than in Caddy, so dev (no proxy) and
