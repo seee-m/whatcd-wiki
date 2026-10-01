@@ -16,7 +16,7 @@ whatcd-goodbye/
 
 # Local-only maintenance script that runs the Discogs bulk import against
 # production, plus its usage instructions, kept alongside it. Not part of
-# the app. (Still written for the old Fly host; see CLAUDE.md.)
+# the app. Runs the importer on the Mac and ships only the diff to prod.
 api/import/update-discogs-videos-prod.sh
 api/import/update-discogs-videos-prod.txt
 
