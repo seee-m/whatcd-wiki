@@ -45,7 +45,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: deploy
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          source: deploy/docker-compose.yml,deploy/Caddyfile
+          source: deploy/docker-compose.yml,deploy/caddy/Caddyfile
           target: /opt/whatcd-wiki
           strip_components: 1
 
@@ -60,4 +60,7 @@ jobs:
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
             docker compose pull app
             docker compose up -d
+            # up -d only recreates a container whose compose config changed;
+            # a Caddyfile-only change needs an explicit (graceful) reload.
+            docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile --adapter caddyfile
             docker image prune -f

@@ -1,9 +1,0 @@
-# Caddy fetches and renews the Let's Encrypt certificates itself, once DNS
-# for both names points at this server.
-whatcd.wiki {
-	reverse_proxy app:4000
-}
-
-www.whatcd.wiki {
-	redir https://whatcd.wiki{uri} permanent
-}

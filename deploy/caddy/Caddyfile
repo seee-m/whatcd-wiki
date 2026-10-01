@@ -1,0 +1,10 @@
+# Caddy fetches and renews the Let's Encrypt certificates itself, once DNS
+# for both names points at this server. It runs on the host's network (see
+# docker-compose.yml), so the app is reached on loopback, not by service name.
+whatcd.wiki {
+	reverse_proxy 127.0.0.1:4000
+}
+
+www.whatcd.wiki {
+	redir https://whatcd.wiki{uri} permanent
+}

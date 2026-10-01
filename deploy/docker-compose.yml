@@ -1,7 +1,16 @@
 # Production stack on the Hetzner server, in /opt/whatcd-wiki alongside
-# Caddyfile. The app image is built by .github/workflows/deploy.yml and
+# caddy/Caddyfile. The app image is built by .github/workflows/deploy.yml and
 # pushed to GHCR; that workflow copies this file up and runs
 # `docker compose pull && docker compose up -d` on every push to main.
+
+# Docker's default json-file driver never rotates: at ~60MB/day of request
+# logs that would eventually fill the 40GB disk. 5 x 20MB per container.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
+
 services:
   app:
     image: ghcr.io/seee-m/whatcd-wiki:latest
@@ -11,23 +20,35 @@ services:
       SQLITE_PATH: /data/whatcd.sqlite
     volumes:
       - /srv/whatcd-data:/data
+    # Loopback only, for Caddy on the host network. Docker-published ports
+    # bypass ufw, so binding 0.0.0.0 here would expose the app directly.
+    ports:
+      - "127.0.0.1:4000:4000"
     # server.ts checkpoints the WAL on SIGTERM before exiting; give it
     # longer than Docker's 10s default so a deploy never cuts that short.
     stop_grace_period: 30s
+    logging: *logging
 
   caddy:
     image: caddy:2
     restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
+    # Host networking, not a published port: Docker relays IPv6 connections
+    # to a bridge-networked container through docker-proxy, which replaces
+    # the client address with the bridge gateway (172.18.0.1) -- every IPv6
+    # visitor looked like the same one, rate limit included. On the host
+    # network Caddy sees the real address and passes it on in
+    # X-Forwarded-For. Listens on 80/443 directly; ufw allows both.
+    network_mode: host
     volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # The directory, not the single file: a file bind mount pins the
+      # original inode, so a Caddyfile replaced by a deploy would never be
+      # seen by `caddy reload`.
+      - ./caddy:/etc/caddy:ro
       - caddy_data:/data
       - caddy_config:/config
     depends_on:
       - app
+    logging: *logging
 
 volumes:
   caddy_data:
