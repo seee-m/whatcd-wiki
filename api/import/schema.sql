@@ -110,6 +110,9 @@ CREATE TABLE artists_similar (
   similar_id INTEGER NOT NULL,
   PRIMARY KEY (artist_id, similar_id)
 );
+-- The artist page self-joins on similar_id (routes/artists.ts); without
+-- this it's a full scan of all ~840k rows per page view.
+CREATE INDEX idx_artists_similar_similar ON artists_similar(similar_id);
 
 CREATE TABLE artists_similar_scores (
   similar_id INTEGER PRIMARY KEY,

@@ -7,10 +7,11 @@ const MAX_TITLE_LENGTH = 200;
 const MAX_DESCRIPTION_LENGTH = 1000;
 
 // Simple in-memory per-IP rate limit on list creation, not reads -- fine on
-// a single always-on Fly machine (no distributed state needed), and cheap
+// a single always-on server (no distributed state needed), and cheap
 // insurance against the table growing from casual abuse/bots without
-// pulling in a dependency for it. Fly's proxy sets fly-client-ip with the
-// real client address; req.ip alone would be Fly's internal proxy address.
+// pulling in a dependency for it. req.ip is the real client address via
+// trustProxy (see server.ts) -- not a fly-client-ip header, which nothing
+// strips once the app isn't behind Fly, so any client could set it.
 const RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
 const RATE_LIMIT_MAX = 20;
 const createTimestamps = new Map<string, number[]>();
@@ -29,7 +30,7 @@ function generateId(): string {
 
 export default async function listsRoutes(app: FastifyInstance) {
   app.post('/api/lists', async (req, reply) => {
-    const ip = (req.headers['fly-client-ip'] as string | undefined) ?? req.ip;
+    const ip = req.ip;
     if (isRateLimited(ip)) {
       reply.code(429);
       return { error: 'too many lists created, try again later' };

@@ -22,7 +22,30 @@ if (fs.existsSync(envPath)) process.loadEnvFile(envPath);
 
 const PORT = Number(process.env.PORT) || 4000;
 
-const app = Fastify({ logger: true });
+// The process only ever sits behind one reverse proxy (Caddy on Hetzner,
+// Fly's proxy before that), so trust exactly one hop: req.ip is then the
+// last X-Forwarded-For entry, the one that proxy appended itself. Trusting
+// more than that would hand req.ip to whatever a client puts in the header.
+//
+// The request log records the user agent and real client address -- the
+// default serializer logs neither usefully (remoteAddress is the proxy), so
+// a crawler hammering the site was indistinguishable from visitors.
+const app = Fastify({
+  trustProxy: (_address, hop) => hop === 0,
+  logger: {
+    serializers: {
+      req(req) {
+        return {
+          method: req.method,
+          url: req.url,
+          host: req.headers.host,
+          ip: req.ip,
+          ua: req.headers['user-agent'],
+        };
+      },
+    },
+  },
+});
 
 // Nothing was compressing anything: Fly's proxy doesn't, and Fastify
 // doesn't by default, so every JSON response and the whole JS bundle went

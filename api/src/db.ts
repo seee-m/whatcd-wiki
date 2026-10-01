@@ -30,6 +30,20 @@ export const db = new DatabaseSync(DB_PATH);
 db.exec('PRAGMA journal_mode = WAL');
 db.exec('PRAGMA synchronous = NORMAL');
 
+// SQLite's defaults are a ~2MB page cache and no mmap, so every read past
+// that went through a read() syscall and a copy. mmap lets queries read
+// straight out of the OS page cache instead. It's address space, not
+// memory: the kernel still decides what stays resident, so a cap above the
+// file size (~4.4GB) is harmless on a 4GB machine. The page cache on top
+// is per connection and there is one.
+db.exec('PRAGMA mmap_size = 8589934592');
+db.exec('PRAGMA cache_size = -65536');
+
+// Missing from databases imported before schema.sql had it. Builds in a few
+// seconds over ~840k rows on first boot, then IF NOT EXISTS is a no-op.
+// Without it the artist page's similar-artists self-join scans the table.
+db.exec('CREATE INDEX IF NOT EXISTS idx_artists_similar_similar ON artists_similar(similar_id)');
+
 // release_covers postdates the original import; create it if this DB was
 // built before the feature existed, so an existing install doesn't need a
 // full re-import just to pick it up.
