@@ -108,6 +108,12 @@ export function Home() {
           </a>{' '}
           &mdash; Send emails to <a href="mailto:what@c-m.work">what@c-m.work</a>
         </p>
+        <p>
+          If you wish to support whatcd.wiki you can{' '}
+          <a href="https://ko-fi.com/connormacdonald" target="_blank" rel="noopener noreferrer">
+            tip me on kofi
+          </a>
+        </p>
         <p className="inert">
           whatcd.wiki is a read-only archive. This site is not part of what.cd. This site has no
           connection to the labels, groups, or artists named here. Cover art, YouTube links, and
